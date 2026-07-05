@@ -1,0 +1,859 @@
+\documentclass[format=sigconf, screen=true, review=false]{acmart}
+
+\usepackage{fancyvrb}    %% Source Code listings
+\usepackage{mathpartir}  %% Type Inference Rules
+
+\DefineVerbatimEnvironment{code}{Verbatim}{fontsize=\small}
+\DefineVerbatimEnvironment{spec}{Verbatim}{fontsize=\small}
+\DefineVerbatimEnvironment{repl}{Verbatim}{fontsize=\small}
+\DefineShortVerb{\|}
+
+\newcommand{\ignoreCode}[1]{}
+\newcommand
+  {\creduce}
+  [2]
+  {#1 \Rightarrow #2}
+\newcommand
+  {\creduced}
+  [2]
+  {#1 \overset{\ast}{\Rightarrow} #2}
+\newcommand
+  {\abstr}
+  [2]
+  {[#1]#2}
+\newcommand
+  {\funty}
+  [3]
+  {(#1:#2) \rightarrow #3}
+\newcommand
+  {\lam}
+  [2]
+  {\lambda #1.#2}
+\newcommand{\inferarrow}{\Rightarrow}
+\newcommand{\checkarrow}{\Leftarrow}
+\newcommand
+  {\tinfer}
+  [4]
+  {#1 \vdash #2 \inferarrow #3 \rightsquigarrow #3}
+\newcommand
+  {\tcheck}
+  [4]
+  {#1 \vdash #2 \checkarrow #3 \rightsquigarrow #3}
+\newcommand{\typ}{\ast}
+\newcommand{\targ}{t_{\mathit{arg}}}
+\newcommand{\tret}{t_{\mathit{ret}}}
+\newcommand{\normeq}{\overset{\ast}{=}}
+\renewcommand{\appendix}[1]{\section{Appendix: #1}}
+
+
+
+\title{A New Implementation Technique For Dependently-Typed Languages}
+\acmConference
+  [IFL2026]
+  {Symposium on Implementation and Application of Functional Languages}
+  {28 -- 30 October, 2026}
+  {Gothenburg, Sweden}
+\author{Alexander Vandenbroucke}
+\orcid{0000-0002-5683-1570}
+\affiliation{
+  \institution{Unaffiliated}
+  \city{London}
+  \country{United Kingdom}}
+
+\email{alexander.vandenbroucke@gmail.com}
+
+\begin{document}
+
+\maketitle
+
+\ignoreCode{
+\begin{code}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# OPTIONS_GHC -Wincomplete-patterns #-}
+
+import Text.Show (showParen)
+import GHC.TypeLits (Nat, type (+))
+import Text.ParserCombinators.ReadP
+import Data.Char (isAlpha, isAlphaNum)
+import Control.Exception (try, displayException)
+\end{code}
+}
+
+
+Once upon a time, I was reading "A tutorial implementation of a dependently
+typed lambda-calculus" by Andres Loeh, Conor McBride and Wouter Swierstra.
+It contains both a mathematical specification of a simple dependently typed
+lambda-calculus and a Haskell implementation of the abstract syntax, evaluation
+and type checking. However, in my opinion, the elegance of the core calculus
+is marred somewhat by the locally-nameless style of the implementation.
+The locally-nameless style uses names (i.e., strings) to represent free
+variables and De-Bruijn indices for locally bound terms.
+While this has certain proof-engineering advantages, for implementing a simple
+calculus, locally nameless representation combines the weaknesses of named and
+nameless (De-Bruijn) representation:
+
+\begin{enumerate}
+\item
+  Substitution with De-Bruijn indices is finnicky and annoying to implement.
+
+\item
+  Evaluation with an environment is inefficient.
+
+\item
+  Evaluation is also needed for type reduction during type checking. So we
+  pay the previously mentioned overhead during type checking too.
+
+\item
+  Checking type equivalence during type checking requires re-quoting a
+  nameless term into a named representation anyway.
+\end{enumerate}
+
+The idea of this article is that we can avoid this unpleasantness by using
+Turner's combinator implementation technique instead. This technique consists
+of two parts: a set of combinators whose reduction rules are extremely simple
+to understand and implement, and an abstraction algorithm which eliminates
+variables from a (untyped) lambda-calculus term by translating it to a
+combinator expression. The abstraction for a dependently-typed lambda term is
+only a modest generalisation from the untyped lambda calculus---though it is
+novel to the best of our knowledge.
+
+Because the key idea of this technique is to eliminate variables (and
+substitution) altogether, it makes for a much more straightforward approach for
+implementing a dependently typed calculus.
+
+Despite our best efforts, two places remain where we need to substitute into
+a type: when typing the body of a dependent function (Pi) type or of an
+anonymous function (Lambda). But since types are combinator expressions,
+substitution is simply function application.
+
+
+\section{Syntax}
+%% ----------------------------------------------------------------------------
+
+To begin, let us define the syntax of the calculus, which is entirely standard.
+It is captured within a GADT, containing both inferrable and checkable terms:
+
+\begin{code}
+data Mode = Infer | Check
+
+data Term (mode :: Mode) where
+  Var :: String -> Term Infer
+  -- ^ Variable
+  Ann :: Term Check -> Term Check -> Term Infer
+  -- ^ Type annotation
+  App :: Term Infer -> Term Check -> Term Infer
+  -- ^ Application
+  Typ :: Term Infer
+  -- ^ Type of Types
+  Fun :: String -> Term Check -> Term Check -> Term Infer
+  -- ^ Function Type
+
+  Lam :: String -> Term Check -> Term Check
+  -- ^ Lambda
+  Inf :: Term Infer -> Term Check
+  -- ^ Embed Inferrable
+\end{code}
+
+The combinator's syntax contains standard |S|, |K|, |I|, |B| and |C|
+combinators; as well as |P| for (dependend) pairs (Pi types), i.e., |P t1 t2|
+is equivalent to $\Pi(x:t1).t2$; |T| for the type of types; |V| for variables,
+and lastly an infix application constructor |:@:|.
+The |S'|, |B'|, |C'| combinators and the "constant" application constructors
+|:<@|, |:@>:| and |:<@>:| are used for the more efficient bracket abstraction
+algorithm, introduced by Turner in "Another Algorithm For Bracket Abstraction".
+They can be ignored on a first reading.
+
+\begin{code}
+data Combinator where
+  S :: Combinator
+  K :: Combinator
+  I :: Combinator
+  B :: Combinator
+  C :: Combinator
+  P :: Combinator                                 -- ^ Pi
+  T :: Combinator                                 -- ^ Type
+  V :: String -> Combinator                       -- ^ Variable
+  (:@:) :: Combinator -> Combinator -> Combinator -- ^ Application
+  -- See [Another Algorithm For Bracket Abstraction]
+  S' :: Combinator
+  B' :: Combinator
+  C' :: Combinator
+  (:<@:)  :: Combinator -> Combinator -> Combinator
+  (:@>:)  :: Combinator -> Combinator -> Combinator
+  (:<@>:) :: Combinator -> Combinator -> Combinator
+  deriving Eq
+
+infixl :@:
+\end{code}
+
+For reduction, these extra application constructors are irrelevant. It is thus
+useful to "normalise" them away at the top-level of a combinator expression:
+
+\begin{code}
+wnf :: Combinator -> Combinator
+wnf (a :<@:  b) = a :@: b
+wnf (a  :@>: b) = a :@: b
+wnf (a :<@>: b) = a :@: b
+wnf a = a
+
+pattern a :*: b <- (wnf -> a :@: b)
+\end{code}
+
+Here |:*:| is a pattern for "any application constructor", think of the * as a
+wildcard for any combination of <,> and @ between the two colons of the
+constructor.
+
+The extra application constructors are als irrelevant when comparing two
+combinator expressions:
+
+\begin{code}
+(=*=) :: Combinator -> Combinator -> Bool
+a =*= b | a == b = True
+(a :*: b) =*= (c :*: d) = a =*= c && b =*= d
+_ =*= _ = False
+infix 4 =*=
+\end{code}
+
+Combinators have the usual reduction rules
+(see Figure~\ref{fig:combinator-reduction}). The |reduce| function performs
+a single step of reduction if possible, and |reduce'| is its reflexive and
+transitive closure.
+
+The |P| combinator allows reduction under its arguments to proceed:
+
+\begin{align*}
+\creduce{P~x~y}{P~x'~y} &\text{ if } \creduce{x}{x'}
+\\
+\creduce{P~x~y}{P~x~y'} &\text{ if } \creduce{y}{y'}
+  \text{ and no previous rule applies}
+\end{align*}
+
+The next three 'Just' clauses implement the reduction rules for S', B' and C'
+(again, feel free to ignore these on a first reading).
+
+\begin{align*}
+\creduce{S'~k~f~g~x}{&k~(f~x)~(g~x)}
+\\
+\creduce{B'~k~f~g~x}{&k~f~(g~x)}
+\\
+\creduce{C'~k~f~g~x}{&k~(f~x)~g}
+\end{align*}
+
+If none of the previous cases match, we recurse down the left-most argument
+until we find the left-most expression that can be reduced.
+
+\begin{figure*}
+\begin{code}
+reduce :: Combinator -> Maybe Combinator
+reduce = \case
+  S :*: f :*: g :*: x           -> Just (f :@: x :@: (g :@: x))
+  I :*: x                       -> Just x
+  K :*: x :*: y                 -> Just x
+  B :*: f :*: g :*: x           -> Just (f :@: (g :@: x))
+  C :*: f :*: g :*: x           -> Just (f :@: x :@: g)
+
+  P :*: x :*: y
+    | Just x' <- reduce x       -> Just (P :@: x' :@: y)
+    | Just y' <- reduce y       -> Just (P :@: x  :@: y')
+
+  S' :*: k :*: f :*: g :*: x    -> Just (k :@: (f :@: x) :@: (g :@: x))
+  B' :*: k :*: f :*: g :*: x    -> Just (k :@: f :@: (g :@: x))
+  C' :*: k :*: f :*: g :*: x    -> Just (k :@: (f :@: x) :@: g)
+
+  f :*: g | Just f' <- reduce f -> Just (f' :@: g)
+    
+  _                             -> Nothing
+
+reduce' :: Combinator -> Combinator
+reduce' c = maybe c reduce' (reduce c)
+\end{code}
+\caption{Combinator Reduction}
+\label{fig:combinator-reduction}
+\end{figure*}
+
+Bracket abstraction is also standard, except that dependent function types are
+abstracted by the following rule (using [x]E to denote abstracting E with
+respect to x):
+
+\begin{equation*}
+\abstr{x}{(\funty{y}{E_1}{E_2})} = P~\abstr{x}{E_1}~\abstr{x}{(\abstr{y}{E_2})}
+\end{equation*}
+
+For convenience, abstraction is defined in a type-class. This allows ad-hoc
+polymorphism in the abstract function, because we need to abstract both
+terms and combinators expressions.
+
+\begin{code}
+class Abstraction e where
+  abstract :: String -> e -> Combinator
+
+instance Abstraction (Term m) where
+  abstract x Typ           = K @@ T
+  abstract x (App e1 e2)   = S @@ abstract x e1 @@ abstract x e2
+  abstract x (Lam y e)     = abstract x (abstract y e)
+  abstract x (Ann e _)     = abstract x e
+  abstract x (Inf e)       = abstract x e
+  abstract x (Fun y e1 e2) =
+    P @@ abstract x e1 @@ abstract x (abstract y e2)
+  abstract x (Var x') | x == x' = I
+                      | otherwise = K @@ V x'
+
+instance Abstraction Combinator where
+  abstract x (V x') | x == x' = I
+  abstract x (e1 :*: e2)      = S @@ abstract x e1 @@ abstract x e2
+  abstract x c                = K @@ c
+\end{code}
+
+The |@@| operator is a smart constructor for application. It implements a more
+efficient abstraction. On a first reading, the reader may pretend that
+|@@| is simply |:@:|. Like |:@:| it binds most tightly to the left.
+
+The first four cases of |@@| replace degenerate applications of |S| with
+applications of |K|, |B| and |C|. Degenerate means that the variable being
+abstracted does not occur in one or both of the sub-expressions.
+
+The next four cases replace applications of |S|, |B| and |C| with the special
+combinators |S'|, |B'| and |C'|. This eliminates the blow-up that might occur
+after repeated abstraction with a series of variables. (Do we actually have
+such a repeated application anywhere?---Yes, it happens if you elaborate a
+sequence of nested lambdas.)
+
+The final four cases select a special case of the application to track which
+operands are composed entirely of constants. The < or > points to the
+arguments that are constant.
+
+\begin{code}
+(@@) :: Combinator -> Combinator -> Combinator
+(S :*: (K :*: a)) @@ (K :*: b) = K @@ (a @@ b)
+(S :*: (K :*: a)) @@ I         = a
+(S :*: (K :*: a)) @@ b         = B @@ a @@ b
+(S :*: a)         @@ (K :*: b) = C @@ a @@ b
+
+(S :*: ((B :<@>: k) :*: a)) @@ b = S' @@ k @@ a @@ b
+(B :*: (k :<@: a))          @@ b = B' @@ k @@ a @@ b
+(B :*: (k :<@>: a))         @@ b = B' @@ k @@ a @@ b
+(C :*: ((B :<@>: k) :*: a)) @@ b = C' @@ k @@ a @@ b
+
+a @@ b | constant a, constant b = a :<@>: b
+       | constant a             = a :<@:  b
+       | constant b             = a  :@>: b
+       | otherwise              = a  :@:  b
+       where
+         constant (V _)       = False
+         constant (_  :@>: _) = False
+         constant (_ :<@:  _) = False
+         constant (_  :@:  _) = False
+         constant _ = True
+
+infixl @@
+\end{code}
+
+\section{Typing}
+%% ----------------------------------------------------------------------------
+
+We now turn to implementing a bi-directional dependently typed calculus.
+Declaratively, the rules are not essentially different from the Lambda-Pi
+calculus, except that we also elaborate the terms into combinator expressions
+while we type-check. Type inference results in a pair of combinator
+expressions: the type (Typ) and an elaboration (Elaboration), capturing the
+static and dynamic semantics of a term. The former follows the typing relation
+and must be irreducible, the latter follows abstraction (more or less) and may
+admit additional reduction.
+
+\begin{code}
+type Typ         = Combinator -- irreducible
+type Elaboration = Combinator
+data Inferred    = Typ :~> Elaboration deriving Show
+\end{code}
+
+As a preliminary, we define simple environments:
+
+\begin{code}
+type Env = [(String,Typ)]
+\end{code}
+
+Given variable $x$ and type $t$, extend the environment with an entry $x:t'$
+where $t'$ is the result of substituting all variables currently in the
+environment into $t$. At this point $t'$ should not have any free variables.
+
+\begin{code}
+extend :: String -> Combinator -> Env -> Env
+extend x c env = fst (extend' x c env)
+\end{code}
+
+For convenience, we also define a version that extends the environment and
+returns the newly added entry:
+
+\begin{code} 
+extend' :: String -> Combinator -> Env -> (Env, Combinator)
+extend' x c env =
+  ((x,xt) : env,xt)
+  where
+    xt = reduce' (foldr (\(y,c) -> (@@ c) . abstract y) c env)
+\end{code}
+
+Inference is as follows: (In the following, $\tinfer{\Gamma}{e}{t}{e'}$ will
+denote that a type $t$ is inferred for term $e$ under environment $\Gamma$ and
+elaborates to $e'$ and $\tcheck{\Gamma}{e}{t}{e'}$ means that $e$ has type $t$
+under environment $G$ and elaborates to $e'$.
+The arrows $\inferarrow$ and $\checkarrow$ are meant to suggest that
+information flows from the term to the type and vice versa.
+Abstraction of $e$ with respect to variable $x$ is denoted $\abstr{x}{e}$, and
+$\creduced{e}{e'}$ means that the expression $e$ reduces to $e'$.)
+
+\begin{code}
+infer :: Env -> Term Infer -> Either String Inferred
+infer env (Var x) = case lookup x env of
+  Nothing -> Left  $ "unbound variable: " <> x
+  Just t  -> Right $ t :~> V x
+\end{code}
+
+\[
+\inferrule
+  {x:T \in \Gamma}
+  {\tinfer{\Gamma}{x}{T}{x}}
+\]
+
+We infer the type of a variable by looking it up in the environment.
+
+\begin{code}
+infer env (Ann e t) = do
+  t' <- check env t T
+  let t'' = reduce' t'
+  e' <- check env e t''
+  Right $ t'' :~> e'
+\end{code}
+
+\[
+\inferrule
+  {
+    \tcheck{\Gamma}{t}{T}{t'}\\
+    \creduced{t'}{t''}\\
+    \tcheck{\Gamma}{e}{t''}{e'}
+  }
+  {
+    \tinfer{\Gamma}{e}{t}{t''}{e'}
+  } 
+\]
+
+For a type annotation, we must first check that the expression on the
+right-hand side of the annotation is indeed a type, i.e., has type Typ. As a
+by-product of type checking, we also get the elaboration.
+This is a combinator expression, which we must reduce further to obtain a type.
+Finally, we check that the expression on the right-hand side of the annotation
+indeed has this type.
+
+\begin{code}
+infer _ Typ = Right $ T :~> T
+\end{code}
+
+\[
+  \inferrule{ }{\tinfer{\Gamma}{\typ}{\typ}{T}}
+\]
+
+Inferring the type of Typ is entirely trivial. It is Typ.
+
+\begin{code}
+infer env (App e1 e2) = do
+  t1 :~> e1' <- infer env e1
+  case t1 of
+    P :*: tArg :*: tRet -> do
+      e2' <- check env e2 tArg
+      let tRet' = reduce' (tRet @@ e2')
+      Right $ tRet' :~> (e1' @@ e2')
+    _ -> Left $
+      "Could not match expected type " <>
+      show (Fun "x" (Inf (Var "A")) (Inf (Var "B"))) <>
+      " with actual type " <>
+      show t1
+\end{code}
+
+\[
+\inferrule
+  {
+    \tinfer{\Gamma}{e_1}{t_1}{e_1'}\\
+    t1 = P~\targ~\tret\\
+    \tcheck{\Gamma}{e_2}{\targ}{e_2'}\\
+    \creduced{\tret}{\tret'}
+  }
+  {\tinfer{\Gamma}{e1~e2}{\tret'}{e_1'~e_2'}}
+\]
+
+Inferring the type of an application starts by inferring the type of the left-
+hand expression. This must be a function type (P). Next, we check that the
+argument (the right-hand expression) has the expected argument type. As a by-
+product, we now have the elaboration of the argument available, which we
+apply to the function type's body to calculate the return type.
+
+\begin{code}
+infer env (Fun x t1 t2) = do
+  t1' <- check env t1 T
+  let t1'' = reduce' t1'
+  t2' <- check (extend x t1'' env) t2 T
+  let t2'' = reduce' t2' -- Is this needed?
+  Right $ T :~> (P @@ t1'' @@ abstract x t2'')
+\end{code}
+
+\[
+\inferrule
+  {
+    \tcheck{\Gamma}{t_1}{\typ}{t_1'}\\
+    \creduced{t_1'}{t_1''}\\
+    \tcheck{x:t_1'',\Gamma}{t_2}{\typ}{t_2'}\\
+    \creduced{t_2'}{t_2''}
+  }
+  {\tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~t_1''~\abstr{x}{t_2''}}}
+\]
+
+Lastly, to infer the type of a function type, we check that the argument
+type is in fact a type. The elaboration of the argument type is a combinator
+expression, which we reduce as far as possible. Then we check that the return
+type is a type, under an environment extended with the argument variable.
+The elaboration of the function is a P combinator applied to the (reduced)
+argument type and the return type (abstracted over the argument variable).
+ 
+\begin{code}
+check :: Env -> Term Check -> Typ -> Either String Elaboration
+check env (Inf e) t = do
+  t' :~> e' <- infer env e
+  if t =*= t' then
+    Right e'
+  else
+    Left $
+      "Type mismatch: Could not match expected type "
+      <> show t <> " with inferred type " <> show t'
+\end{code}
+
+\[
+\inferrule
+  {
+   \tinfer{\Gamma}{e}{t'}{e'}\\
+   t \normeq t'
+  }
+  {\tcheck{\Gamma}{e}{t}{e'}}
+\]
+
+We can check all inferrable terms simply by inferring their type, and then
+verifying that the inferred combinator expressions are the same.
+
+\begin{code}
+check env (Lam x e) t = do
+  case t of
+    P :*: t1 :*: t2 -> do
+      let (env',xt) = extend' x t1 env
+          t2' = reduce' (t2 @@ xt)
+      abstract x <$> check env' e t2'
+      -- should we substitute into the body here?
+      -- does lambda-pi have the same flaw?
+    _ ->
+      Left $
+        "Could not match type " <> show t <>
+        " while checking a lambda abstraction."
+\end{code}
+
+\[
+\inferrule
+  {
+    x:xt,\Gamma = \mathit{extend'}~x~t_1~\Gamma\\
+    \creduced{t_2~x_t}{t_2'}\\
+    \tcheck{x:x_t,\Gamma}{e}{t_2'}{e'}
+  }
+  {\tcheck{\Gamma}{\lam{x}{e}}{P~t_1~t_2}{\abstr{x}{e'}}}
+\]
+
+A lambda term can only be checked successfully against a function type. The
+procedure is to check the body against the calculated return type, in an
+environment extended with the bound variable. This return type is calculated by
+applying the body of the function type to the same type with which we extended
+the environment. In this type all variables that are inside the environment
+will have been instantiated.
+
+
+\section{Examples}
+%% ----------------------------------------------------------------------------
+
+The remainder of this article implements pretty printing, parsing and a small
+REPL, that, while useful, are not particularily interesting. However, the REPL
+will serve as a vehicle for some small examples.
+
+Typing an (inferrable) term at the REPL causes it to parse, type and then
+reduce that term, for example:
+
+\begin{repl}
+> *
+T -> T
+ : T
+\end{repl}
+
+This means that the string "*" is elaborated into the term T. The "=> T" means
+that this elaboration reduces to T, and ": T" means that it has type T. Let us
+look at an example that uses more than one combinator next:
+
+\begin{repl}
+> (\x.x) : (x:*) -> *
+I => I
+ : P T (K T)
+\end{repl}
+
+The term |\x.x : (x:*) -> *| elaborates to I, which is irreducible and it has
+type P T (K T), that is, a function (P) taking a value A of type T (i.e., a
+type) as an argument and returning a value of type K T A => T (i.e., also a
+type). Contrast with the following:
+
+\begin{repl}
+> (\f.f *) : (f:(x:*) -> *) -> *
+C I T => C I T
+ : P (P T (K T)) (K T)
+\end{repl}
+
+Here the expression takes a function f : (x:*) -> * as argument, and applies it
+to *. The type is P (P T (K T)) (K T) is a function, taking a function F (see
+above) as an argument and returning K T F => T.
+
+So far, all combinator expressions have been irreducible. Let's change that by
+applying (|\f.f *|) to the identity function:
+
+\begin{repl}
+> ((\f.f *) : (f:(x:*) -> *) -> *) (\x.x)
+C I T I => T
+ : T
+\end{repl}
+
+The expression now elaborates to C I T I => I I T => I T => T. The overall
+expression has type T as expected. Finally, we are not restricted to just
+types (*) as arguments. Here is a identity function that is polymorphic in the
+type A:
+
+\begin{repl}
+> (\A.\x.x) : (A:*) -> (x:A) -> A
+K I => K I
+ : P T (S P K)
+\end{repl}
+
+Applying the return type to some type A, we get S P K A => P A (K A), that
+is, a function where we expect an argument, say x, of type A, and then the
+return type is K A x => A.
+
+We can also introduce a higher-order type T, which we can then apply to a
+matching type:
+
+\begin{repl}
+> (A : (B : *) -> *) -> A *
+P (P T (K T)) (C I T) => P (P T (K T)) (C I T)
+ : T
+\end{repl}
+
+The produced expression certainly looks impressive. We cannot just pass any old
+type to A:
+
+\begin{repl}
+> (C : (B : *) -> *) -> (A : (B : *) -> *) -> A C
+Type mismatch: Could not match expected type T with inferred type P T (K T)
+\end{repl}
+
+Where do we go from here? More language features? Comparison? Acknowledge that
+Lambda-Pi is still pretty neat. Can we do implicits?
+
+
+\appendix{Pretty Printing}
+%% ----------------------------------------------------------------------------
+
+The built-in Show class is good enough to insert the right parentheses when
+appropriate:
+
+\begin{code}
+instance Show (Term m) where
+  showsPrec d = \case
+    Var x -> str x
+    Typ   -> str "*"
+    Inf e -> showsPrec d e
+    Ann e t -> showParen (d > ann_d) $
+      showsPrec (ann_d + 1) e . str " : " . showsPrec fun_d t
+    App e1 e2 -> showParen (d > app_d) $
+      showsPrec (app_d + 1) e1 . str " " . showsPrec (app_d + 1) e2
+    Lam x e -> showParen (d > lam_d) $
+      str "\\" . str x . str "." . showsPrec lam_d e
+    Fun x t1 t2 -> showParen (d > fun_d) $
+      str "(" . str x . str  ":" . showsPrec (fun_d + 1) t1 . str ") -> "
+      . showsPrec fun_d t2
+    where
+      str x r = x ++ r
+      lam_d = 1 :: Int
+      fun_d = 2 :: Int
+      ann_d = 3 :: Int
+      app_d = 4 :: Int
+
+instance Show Combinator where
+  showsPrec d = \case
+    S -> str "S"
+    K -> str "K"
+    I -> str "I"
+    B -> str "B"
+    C -> str "C"
+    P -> str "P"
+    T -> str "T"
+    V x -> (x ++)
+    c1  :@:  c2 -> app c1 c2
+    c1 :<@:  c2 -> app c1 c2
+    c1  :@>: c2 -> app c1 c2
+    c1 :<@>: c2 -> app c1 c2
+    S' -> str "S'"
+    B' -> str "B'"
+    C' -> str "C'"
+    where
+      app c1 c2 = showParen (d > 1) $
+        showsPrec 1 c1 . (" " ++) . showsPrec 2 c2
+      str x r = x ++ r
+\end{code}
+
+
+\appendix{Parsing}
+%% -----------------------------------------------------------------------------
+
+The parser recognises the following grammar:
+
+\begin{spec}
+Expr := \V -> Abs | App
+Type := (x:Expr) -> Typ | Ann
+Ann  := App : Type | App
+App  := App Atom | Atom
+Atom := var | * | (Expr)
+\end{spec}
+
+The approach followed here was inspired by "Design Patterns for Parser
+Combinators (Functional Pearl)".
+
+\begin{code}
+data Expr  = ELam String Expr       | OfType EType deriving Show
+data EType = EFun String Expr EType | OfAnn  EAnn  deriving Show
+data EAnn  = EAnn EApp EType        | OfApp  EApp  deriving Show
+data EApp  = EApp EApp EAtom        | OfAtom EAtom deriving Show
+data EAtom = EVar String | ETyp | EPar Expr        deriving Show
+
+expr :: ReadP Expr
+expr = (<++ (OfType <$> etype)) $ do
+  symbol "\\"
+  x <- variable
+  symbol "."
+  e <- expr
+  pure $ ELam x e
+
+eann :: ReadP EAnn
+eann = do
+  e <- eapp
+  ((EAnn e <$ symbol ":" <*> etype) <++ pure (OfApp e))
+
+etype :: ReadP EType
+etype = (<++ (OfAnn <$> eann)) $ do
+  symbol "("
+  x <- variable
+  symbol ":"
+  e1 <- expr
+  symbol ")"
+  symbol "->"
+  e2 <- etype
+  pure (EFun x e1 e2)
+
+eapp :: ReadP EApp
+eapp = infixl1 OfAtom eatom (pure EApp)
+
+eatom :: ReadP EAtom
+eatom =
+      (ETyp <$  symbol "*")
+  <++ (EVar <$> variable)
+  <++ (EPar <$> (symbol "(" *> expr <* symbol ")"))
+
+
+lexeme :: ReadP a -> ReadP a
+lexeme p = p <* skipSpaces
+
+symbol :: String -> ReadP String
+symbol = lexeme . string
+
+variable :: ReadP String
+variable =
+  lexeme $ (:) <$> satisfy (liftA2 (||) isAlpha (=='_')) <*> munch isAlphaNum
+
+infixl1 :: (a -> b) -> ReadP a -> ReadP (b -> a -> b) -> ReadP b
+infixl1 wrap p op = (wrap <$> p) <**> rest
+  where
+    rest = (flip (.) <$> (flip <$> op <*> p) <*> rest) <++ pure id
+    fx <**> ff = do
+      x <- fx
+      f <- ff
+      pure (f x)
+
+class ToTerm e where
+  toTerm :: e -> Maybe (Term Check)
+
+instance ToTerm Expr where
+  toTerm (ELam x e) = Lam x <$> toTerm e
+  toTerm (OfType e)  = toTerm e
+
+instance ToTerm EAnn where
+  toTerm (EAnn e t) = Inf <$> (Ann <$> toTerm e <*> toTerm t)
+  toTerm (OfApp t) = toTerm t
+
+instance ToTerm EType where
+  toTerm (EFun x t1 t2) = Inf <$> (Fun x <$> toTerm t1 <*> toTerm t2)
+  toTerm (OfAnn e)      = toTerm e
+
+instance ToTerm EApp where
+  toTerm (EApp e a) = do
+    Inf t <- toTerm e
+    Inf . App t <$> toTerm a
+  toTerm (OfAtom a) = toTerm a
+
+instance ToTerm EAtom where
+  toTerm (EVar x) = Just (Inf (Var x))
+  toTerm ETyp     = Just (Inf Typ)
+  toTerm (EPar e) = toTerm e
+
+parse :: String -> Either String (Term Check)
+parse = result . readP_to_S (skipSpaces *> expr <* eof) where
+  result [(e,"")] | Just t <- toTerm e = Right t
+  result _                             = Left "Syntax error!"
+\end{code}
+
+
+\appendix{Simple REPL}
+%% ----------------------------------------------------------------------------
+
+\begin{code}
+main :: IO ()
+main =
+  let
+    eval str = either id id $ do
+      t <- parse str
+      case t of
+        Lam{} -> Left "The top-level term must be inferrable!"
+        Inf t -> do
+          (t :~> c) <- infer [] t
+          Right $
+            show c <> " => " <> show (reduce' c)
+            <> "\n : " <> show t
+    go = do
+      putStr "> "
+      getLine >>= \str -> do
+        case str of
+          ":h" -> do
+            putStrLn $ "Usage: <expression> | :l <file> | :h | :q"
+            go
+          ":q" -> pure ()
+          (words -> [":l", file]) -> do
+            try (readFile file) >>=
+               putStrLn . either (displayException @IOError) eval
+            go
+          _ -> do
+            putStrLn $ eval str
+            go
+  in go
+\end{code}
+
+\end{document}
