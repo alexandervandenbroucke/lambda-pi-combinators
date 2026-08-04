@@ -86,13 +86,13 @@ TODO
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
+module LambdaPiCombinators where
+
 import Text.Show (showParen)
 import GHC.TypeLits (Nat, type (+))
 import Text.ParserCombinators.ReadP
 import Data.Char (isAlpha, isAlphaNum)
 import Control.Exception (try, displayException)
-
-module LambdaPiCombinators where
 
 \end{code}
 
