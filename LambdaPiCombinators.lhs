@@ -91,6 +91,9 @@ import GHC.TypeLits (Nat, type (+))
 import Text.ParserCombinators.ReadP
 import Data.Char (isAlpha, isAlphaNum)
 import Control.Exception (try, displayException)
+
+module LambdaPiCombinators where
+
 \end{code}
 
 }
@@ -143,8 +146,8 @@ The remainder of this article is laid out as follows:
 \item
   We recall the syntax for both the simple dependently typed calculus
   introduced by the previous tutorial. Introduce the following set of
-  combinators that we will use throughout the article: |S|,|K|,|I|,|B|, |C|,
-  |P|,|S'|,|B'| and |C'| (Section~\ref{sec:syntax}).
+  combinators that we will use throughout the article: |S|, |K|, |I|, |B|, |C|,
+  |P|, |S'|, |B'| and |C'| (Section~\ref{sec:syntax}).
   We also recall the reduction rules for these combinators
   (Section~\ref{sec:reduction}).
 
@@ -153,23 +156,20 @@ The remainder of this article is laid out as follows:
   abstract function types (Section~\ref{sec:bracket-abstraction}).
 
 \item
-  We introduce a bi-directional type system, which bears a strong resemblance
+  We introduce a bi-directional type system bearing a strong resemblance
   to the system introduced by the original tutorial.
   The key innovation is that our typing relations simultaneously perform an
   elaboration of the term that is being typed into a combinator expression.
-  (TODO: discuss implication here or above.)
+  This means that whenever we needed to reduce a term in the original typing
+  relation (necessitating re-quoting the term), we can now reduce the
+  elaborated combinator expression instead.
   (Section~\ref{sec:typing})
 
 \item
-  Examples
-  (Section~\ref{sec:examples})
-
-\item
-  Related work (Section~\ref{sec:related-work})
-
-\item
-  Conclusion (Section~\ref{sec:conclusion})
-
+  Section~\ref{sec:examples} gives some examples of typing and executing
+  the new calculus.
+  Section~\ref{sec:related-work}) discusses related work and
+  Section~\ref{sec:conclusion} concludes.
 \end{itemize}
 
 Despite our best efforts, two places remain where we need to substitute into
@@ -182,9 +182,9 @@ substitution is simply function application.
 %% ----------------------------------------------------------------------------
 \label{sec:syntax}
 
-To begin, let us define the (abstract) syntaxes of the calculus and the
-combinators. Since this is a dependently typed calculus, there is no syntactic
-distinction between types and terms, both are captured by the |Term| GADT.
+To begin, let us define the (abstract) syntax of the calculus and the
+combinator. Since this is a dependently typed calculus, there is no syntactic
+distinction between types and terms: both are captured by the |Term| GADT.
 However, there is a separation between terms whose type can be inferred, and
 whose type can only be checked. For this reason, |Term| is indexed by a |Mode|.
 In all other respects the syntax should be entirely unsurprising.
@@ -215,7 +215,7 @@ as well as |P| for (dependent) function types ($\Pi$-types); |T| for the type
 of types; |V| for variables, and lastly an infix application constructor |:@:|.
 The |S'|, |B'| and |C'| combinators and the ``constant'' application
 constructors |:<@:|, |:@>:| and |:<@>:| are used for the more efficient bracket
-abstraction algorithm, introduced by
+abstraction algorithm, described by
 Turner~\citep{DBLP:journals/jsyml/Turner79}. They can be ignored on a first
 reading.
 
@@ -451,12 +451,10 @@ Therefore $t'$ should not have any free variables.
 
 \begin{code}
 extend :: String -> Combinator -> Env -> Env
-extend x c env = (x,xt) : env
+extend x c env = (x,t') : env
   where
-    xt = reduce' (foldr (\(y,c) -> (@@ c) . abstract y) c env)
+    t' = reduce' (foldr (\(y,c) -> (@@ c) . abstract y) c env)
 \end{code}
-
-
 
 
 \subsection{Type Inference}
@@ -953,6 +951,6 @@ main =
 \end{code}
 
 \bibliographystyle{plain}
-\bibliography{lambda-pi-combinators}
+\bibliography{LambdaPiCombinators}
 
 \end{document}
