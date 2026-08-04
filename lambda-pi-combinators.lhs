@@ -97,10 +97,11 @@ import Control.Exception (try, displayException)
 
 Once upon a time, I was reading ``A tutorial implementation of a dependently
 typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}.
-It contains both a mathematical specification of a simple dependently typed
+It contains both a formal specification of a simple dependently typed
 lambda-calculus and a Haskell implementation of the abstract syntax, evaluation
 and type checking. However, in my opinion, the elegance of the core calculus
-is marred somewhat by the locally-nameless style of the implementation.
+is spoiled somewhat by the locally-
+nameless~\citep{DBLP:journals/jar/Chargueraud12} style of the implementation.
 The locally-nameless style uses names (i.e., strings) to represent free
 variables and De-Bruijn indices for locally bound terms.
 While this has certain proof-engineering advantages, for implementing a simple
@@ -109,33 +110,67 @@ nameless (De-Bruijn) representation:
 
 \begin{enumerate}
 \item
-  Substitution with De-Bruijn indices is finnicky and annoying to implement.
-
-\item
-  Evaluation with an environment is inefficient.
-
-\item
-  Evaluation is also needed for type reduction during type checking. So we
-  pay the previously mentioned overhead during type checking too.
+  Substitution with De-Bruijn indices is fiddly and annoying to implement.
 
 \item
   Checking type equivalence during type checking requires re-quoting a
   nameless term into a named representation anyway.
+
+\item
+  Evaluation with De-Bruijn indices is inefficient.
+
+\item
+  Evaluation is also needed for type reduction during type checking. So we
+  pay the previously mentioned overhead during type checking too.
 \end{enumerate}
 
 The idea of this article is that we can avoid this unpleasantness by using
 Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation technique
-instead. This technique consists of two parts: a set of combinators whose
-reduction rules are extremely simple to understand and implement, and an
-abstraction algorithm which eliminates variables from a (untyped) lambda-
-calculus term by translating it to a combinator expression.
-The abstraction for a dependently-typed lambda term is only a modest
+instead. This technique consists of two parts: a set of basic combinators
+whose reduction rules are extremely simple to understand and implement, and an
+abstraction algorithm which eliminates variables from a lambda-calculus term by
+translating it into those combinators.
+The abstraction algorithm for a dependently-typed lambda term is only a modest
 generalisation from the untyped lambda calculus---though it is novel to the
 best of our knowledge.
 
 Because the key idea of this technique is to eliminate variables (and
 substitution) altogether, it makes for a much more straightforward approach for
 implementing a dependently typed calculus.
+
+The remainder of this article is laid out as follows:
+\begin{itemize}
+\item
+  We recall the syntax for both the simple dependently typed calculus
+  introduced by the previous tutorial. Introduce the following set of
+  combinators that we will use throughout the article: |S|,|K|,|I|,|B|, |C|,
+  |P|,|S'|,|B'| and |C'| (Section~\ref{sec:syntax}).
+  We also recall the reduction rules for these combinators
+  (Section~\ref{sec:reduction}).
+
+\item
+  We present the bracket abstraction algorithm, extended with a rule to
+  abstract function types (Section~\ref{sec:bracket-abstraction}).
+
+\item
+  We introduce a bi-directional type system, which bears a strong resemblance
+  to the system introduced by the original tutorial.
+  The key innovation is that our typing relations simultaneously perform an
+  elaboration of the term that is being typed into a combinator expression.
+  (TODO: discuss implication here or above.)
+  (Section~\ref{sec:typing})
+
+\item
+  Examples
+  (Section~\ref{sec:examples})
+
+\item
+  Related work (Section~\ref{sec:related-work})
+
+\item
+  Conclusion (Section~\ref{sec:conclusion})
+
+\end{itemize}
 
 Despite our best efforts, two places remain where we need to substitute into
 a type: when typing the body of a dependent function (Pi) type or of an
@@ -145,12 +180,14 @@ substitution is simply function application.
 
 \section{Syntax}
 %% ----------------------------------------------------------------------------
+\label{sec:syntax}
 
-To begin, let us define the syntax of the calculus, which is entirely standard.
-Since this is a dependently typed calculus, there is no syntactic distinction
-between types and terms. However, there is a separation between terms whose
-type can be inferred, and whose type can only be checked.
-This is captured by the |Term| GADT, which is indexed by |Mode|.
+To begin, let us define the (abstract) syntaxes of the calculus and the
+combinators. Since this is a dependently typed calculus, there is no syntactic
+distinction between types and terms, both are captured by the |Term| GADT.
+However, there is a separation between terms whose type can be inferred, and
+whose type can only be checked. For this reason, |Term| is indexed by a |Mode|.
+In all other respects the syntax should be entirely unsurprising.
 
 \begin{code}
 data Mode = Infer | Check
@@ -236,6 +273,7 @@ infix 4 =*=
 
 \section{Combinator Reduction}
 %% ----------------------------------------------------------------------------
+\label{sec:reduction}
 
 Combinators have the usual reduction rules. The |reduce| function (written
 in formulae as $\creduce{}{}$) performs a single step of reduction if possible.
@@ -287,8 +325,8 @@ argument until we find the left-most expression that can be reduced.
   _                             -> Nothing
 \end{code}
 
-The reflexive and transitive closure of $\creduce{}{}$, denoted
-$\creduced{}{}$, is implemented by |reduce'|:
+The extension of $\creduce{}{}$ to multiple steps, denoted $\creduced{}{}$, is
+implemented by |reduce'|:
 
 \begin{code}
 reduce' :: Combinator -> Combinator
@@ -297,6 +335,7 @@ reduce' c = maybe c reduce' (reduce c)
 
 \section{Bracket Abstraction}
 %% ----------------------------------------------------------------------------
+\label{sec:bracket-abstraction}
 
 The bracket abstraction algorithm is also standard, except that dependent
 function types (|Fun|) are abstracted by the following rule (using [x]E to
@@ -318,7 +357,8 @@ class Abstraction e where
 
 instance Abstraction (Term m) where
   abstract x Typ           = K @@ T
-  abstract x (App e1 e2)   = S @@ abstract x e1 @@ abstract x e2
+  abstract x (App e1 e2)   = S @@ abstract x e1
+                               @@ abstract x e2
   abstract x (Lam y e)     = abstract x (abstract y e)
   abstract x (Ann e _)     = abstract x e
   abstract x (Inf e)       = abstract x e
@@ -329,7 +369,8 @@ instance Abstraction (Term m) where
 
 instance Abstraction Combinator where
   abstract x (V x') | x == x' = I
-  abstract x (e1 :*: e2)      = S @@ abstract x e1 @@ abstract x e2
+  abstract x (e1 :*: e2)      = S @@ abstract x e1
+                                  @@ abstract x e2
   abstract x c                = K @@ c
 \end{code}
 
@@ -343,13 +384,12 @@ abstracted does not occur in one or both of the sub-expressions.
 
 The next four cases replace applications of |S|, |B| and |C| with the special
 combinators |S'|, |B'| and |C'|. This eliminates the blow-up that might occur
-after repeated abstraction with a series of variables. (Do we actually have
-such a repeated application anywhere?---Yes, it happens if you elaborate a
-sequence of nested lambdas.)
+after repeated abstraction with a series of variables---this happens if you
+abstract a sequence of nested lambdas.
 
-The final four cases select a special case of the application to track which
-operands are composed entirely of constants. The < or > points to the
-arguments that are constant.
+The final four cases define the special application operator |@@| tracking
+which operands are composed entirely of constants.
+The < or > points to the arguments that are constant.
 
 \begin{code}
 (@@) :: Combinator -> Combinator -> Combinator
@@ -379,6 +419,7 @@ infixl @@
 
 \section{Typing}
 %% ----------------------------------------------------------------------------
+\label{sec:typing}
 
 We now turn to implementing a bi-directional dependently typed calculus.
 Declaratively, the rules are not essentially different from the Lambda-Pi
@@ -614,6 +655,7 @@ check env (Lam x e) t = do
 
 \section{Examples}
 %% ----------------------------------------------------------------------------
+\label{sec:examples}
 
 The remaining code in this article implements pretty printing, parsing and a
 small REPL, that, while useful, are not particularily interesting.
@@ -704,6 +746,11 @@ Lambda-Pi is still pretty neat. Can we do implicits?
 
 \section{Related Work}
 %% ----------------------------------------------------------------------------
+\label{sec:related-work}
+
+\section{Conclusion}
+%% ----------------------------------------------------------------------------
+\label{sec:conclusion}
 
 \appendix{Pretty Printing}
 %% ----------------------------------------------------------------------------
@@ -720,11 +767,14 @@ instance Show (Term m) where
     Ann e t -> showParen (d > ann_d) $
       showsPrec (ann_d + 1) e . str " : " . showsPrec fun_d t
     App e1 e2 -> showParen (d > app_d) $
-      showsPrec (app_d + 1) e1 . str " " . showsPrec (app_d + 1) e2
+      showsPrec (app_d + 1) e1
+      . str " "
+      . showsPrec (app_d + 1) e2
     Lam x e -> showParen (d > lam_d) $
       str "\\" . str x . str "." . showsPrec lam_d e
     Fun x t1 t2 -> showParen (d > fun_d) $
-      str "(" . str x . str  ":" . showsPrec (fun_d + 1) t1 . str ") -> "
+      str "(" . str x . str  ":" . showsPrec (fun_d + 1) t1
+      . str ") -> "
       . showsPrec fun_d t2
     where
       str x r = x ++ r
@@ -822,7 +872,9 @@ symbol = lexeme . string
 
 variable :: ReadP String
 variable =
-  lexeme $ (:) <$> satisfy (liftA2 (||) isAlpha (=='_')) <*> munch isAlphaNum
+  lexeme $
+    (:) <$> satisfy (liftA2 (||) isAlpha (=='_'))
+        <*> munch isAlphaNum
 
 infixl1 :: (a -> b) -> ReadP a -> ReadP (b -> a -> b) -> ReadP b
 infixl1 wrap p op = (wrap <$> p) <**> rest
