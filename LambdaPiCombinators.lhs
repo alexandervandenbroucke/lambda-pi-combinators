@@ -113,24 +113,23 @@ nameless (De-Bruijn) representation:
 
 \begin{enumerate}
 \item
-  Substitution with De-Bruijn indices is fiddly and annoying to implement.
+  Evaluation is also needed for type reduction during type checking, but
+  evaluation with De-Bruijn indices is inefficient.
 
 \item
-  Checking type equivalence during type checking requires re-quoting a
+  De-Bruijn indices are nevertheless used because they are alledgedly simple,
+  but I find substitution with De-Bruijn indices is fiddly and annoying to
+  implement.
+
+\item
+  Verifying type equivalence during type checking requires re-quoting a
   nameless term into a named representation anyway.
-
-\item
-  Evaluation with De-Bruijn indices is inefficient.
-
-\item
-  Evaluation is also needed for type reduction during type checking. So we
-  pay the previously mentioned overhead during type checking too.
 \end{enumerate}
 
 The idea of this article is that we can avoid this unpleasantness by using
 Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation technique
-instead. This technique consists of two parts: a set of basic combinators
-whose reduction rules are extremely simple to understand and implement, and an
+instead. This technique consists of two parts that are simple to understand
+and implement: a set of basic combinators and reduction rules, and an
 abstraction algorithm which eliminates variables from a lambda-calculus term by
 translating it into those combinators.
 The abstraction algorithm for a dependently-typed lambda term is only a modest
@@ -138,8 +137,8 @@ generalisation from the untyped lambda calculus---though it is novel to the
 best of our knowledge.
 
 Because the key idea of this technique is to eliminate variables (and
-substitution) altogether, it makes for a much more straightforward approach for
-implementing a dependently typed calculus.
+substitution) altogether, it makes implementing a dependently typed calculus
+much more straightforward.
 
 The remainder of this article is laid out as follows:
 \begin{itemize}
