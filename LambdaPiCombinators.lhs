@@ -100,12 +100,14 @@ import Control.Exception (try, displayException)
 }
 
 Once upon a time, I was reading ``A tutorial implementation of a dependently
-typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}.
+typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}. 
 It contains both a formal specification of a simple dependently typed
 lambda-calculus and a Haskell implementation of the abstract syntax, evaluation
-and type checking. However, in my opinion, the elegance of the core calculus
-is spoiled somewhat by the locally-
-nameless~\citep{DBLP:journals/jar/Chargueraud12} style of the implementation.
+and type checking. The tutorial is excellent, and I would warmly recommend it
+to anyone interested in a basic implementation of dependent types.
+However, in my opinion, the elegance of the core calculus is spoiled somewhat
+by the locally- nameless~\citep{DBLP:journals/jar/Chargueraud12} style of the
+implementation.
 The locally-nameless style uses names (i.e., strings) to represent free
 variables and De-Bruijn indices for locally bound terms.
 While this has certain proof-engineering advantages, for implementing a simple
@@ -118,13 +120,13 @@ nameless (De-Bruijn) representation:
   evaluation with De-Bruijn indices is inefficient.
 
 \item
-  De-Bruijn indices are nevertheless used because they are alledgedly simple,
-  but I find substitution with De-Bruijn indices is fiddly and annoying to
-  implement.
+  De-Bruijn indices are nevertheless often used because they are alledgedly
+  simple, but I find substitution with De-Bruijn indices is fiddly and annoying
+  to implement.
 
 \item
   Verifying type equivalence during type checking requires re-quoting a
-  nameless term into a named representation anyway.
+  locally-nameless term into a named representation anyway.
 \end{enumerate}
 
 The idea of this article is that we can avoid this unpleasantness by using
@@ -145,15 +147,16 @@ The remainder of this article is laid out as follows:
 \begin{itemize}
 \item
   We recall the syntax for both the simple dependently typed calculus
-  introduced by the previous tutorial. Introduce the following set of
-  combinators that we will use throughout the article: |S|, |K|, |I|, |B|, |C|,
-  |P|, |S'|, |B'| and |C'| (Section~\ref{sec:syntax}).
+  introduced by the previously mentioned tutorial and then introduce the
+  set of combinators needed for the implementation in this article: |S|, |K|,
+  |I|, |B|, |C|, |P|, |S'|, |B'| and |C'| (Section~\ref{sec:syntax}).
   We also recall the reduction rules for these combinators
   (Section~\ref{sec:reduction}).
 
 \item
-  We present the bracket abstraction algorithm, extended with a rule to
-  abstract function types (Section~\ref{sec:bracket-abstraction}).
+  Section~\ref{sec:bracket-abstraction} presents the bracket abstraction
+  algorithm, extended with a rule to abstract function types, which is
+  novel to the best of my knowledge.
 
 \item
   We introduce a bi-directional type system bearing a strong resemblance
@@ -183,11 +186,14 @@ substitution is simply function application.
 \label{sec:syntax}
 
 To begin, let us define the (abstract) syntax of the calculus and the
-combinator. Since this is a dependently typed calculus, there is no syntactic
+combinators. Since this is a dependently typed calculus, there is no syntactic
 distinction between types and terms: both are captured by the |Term| GADT.
 However, there is a separation between terms whose type can be inferred, and
 whose type can only be checked. For this reason, |Term| is indexed by a |Mode|.
 In all other respects the syntax should be entirely unsurprising.
+The surface level syntax is annotated below every constructor (e.g., |*| for
+|Typ|, |\x.t| for |Lam x t|, etc.).
+
 
 \begin{code}
 data Mode = Infer | Check
@@ -202,7 +208,7 @@ data Term (mode :: Mode) where
   Typ :: Term Infer
   -- ^ Type of Types, *
   Fun :: String -> Term Check -> Term Check -> Term Infer
-  -- ^ Function Type,  (x:t) -> t
+  -- ^ Function Type, (x:t) -> t
 
   Lam :: String -> Term Check -> Term Check
   -- ^ Lambda, \x.t
@@ -387,7 +393,7 @@ combinators |S'|, |B'| and |C'|. This eliminates the blow-up that might occur
 after repeated abstraction with a series of variables---this happens if you
 abstract a sequence of nested lambdas.
 
-The final four cases define the special application operator |@@| tracking
+The final four clauses define the special application operator |@@| tracking
 which operands are composed entirely of constants.
 The < or > points to the arguments that are constant.
 
@@ -444,10 +450,10 @@ As a preliminary, we define simple environments:
 type Env = [(String,Typ)]
 \end{code}
 
-Given variable $x$ and type $t$, extending an environment $E$ results in a new
-environment $x:t',E$ where $t'$ is the result of substituting all variables
-currently in $E$ into $t$.
-Therefore $t'$ should not have any free variables.
+Given variable $x$ and type $t$, extending an environment $\Gamma$ results in
+a new environment $x:t_x,\Gamma$ where $t_x$ is the result of substituting all
+variables currently in $E$ into $t$.
+Therefore $t_x$ should not have any free variables.
 
 \begin{code}
 extend :: String -> Combinator -> Env -> Env
@@ -460,23 +466,25 @@ extend x c env = (x,t') : env
 \subsection{Type Inference}
 %% ========================
 
-In the following, $\tinfer{\Gamma}{e}{t}{e'}$ will
+In the following, $\tinfer{\Gamma}{e}{t}{c}$ will
 denote that a type $t$ is inferred for term $e$ under environment $\Gamma$ and
-elaborates to $e'$ and $\tcheck{\Gamma}{e}{t}{e'}$ means that $e$ has type $t$
-under environment $G$ and elaborates to $e'$.
+elaborates to $c$ and $\tcheck{\Gamma}{e}{t}{c}$ means that $e$ has type $t$
+under environment $G$ and elaborates to $c$.
 The arrows $\inferarrow$ and $\checkarrow$ are meant to suggest that
 information flows from the term to the type and vice versa.
 As before, abstraction of $e$ with respect to variable $x$ is written as
 $\abstr{x}{e}$, and $\creduced{e}{e'}$ means that the expression $e$ reduces to
 $e'$, where $e'$ is irreducible.
+Each typing rule is given together with the corresponding clause of |infer| or
+|check| implementing that rule.
 
 \paragraph{Variable}
 A variable's type is inferred by looking it up in the environment.
 
 \[
 \inferrule
-  {x:T \in \Gamma}
-  {\tinfer{\Gamma}{x}{T}{x}}
+  {x:t \in \Gamma}
+  {\tinfer{\Gamma}{x}{t}{x}}
 \]
 
 \begin{code}
@@ -488,7 +496,7 @@ infer env (Var x) = case lookup x env of
 
 \paragraph{Annotation}
 For a type annotation, we must first check that the expression on the
-right-hand side of the annotation is indeed a type, i.e., has type |Typ|. As a
+right-hand side of the annotation is indeed a type, i.e., has type $\typ$. As a
 by-product of type checking, we also get the elaboration.
 This is a combinator expression, which we must reduce further to obtain a type.
 Finally, we check that the expression on the right-hand side of the annotation
@@ -515,11 +523,11 @@ infer env (Ann e r) = do
 \end{code}
 
 \paragraph{Type}
-Inferring the type of |Typ| is entirely trivial. It is |Typ|. (A bit
-controversial perhaps.)
+Inferring the type of $\typ$ is entirely trivial---though perhaps a bit
+controversial: it is |T|.
 
 \[
-  \inferrule{ }{\tinfer{\Gamma}{\typ}{\typ}{T}}
+  \inferrule{ }{\tinfer{\Gamma}{\typ}{T}{T}}
 \]
 
 \begin{code}
@@ -528,7 +536,7 @@ infer _ Typ = Right $ T :~> T
 
 \paragraph{Application}
 Inferring the type of an application starts by inferring the type of the left-
-hand expression. This must be a function type ($P$-combinator). Next, we check
+hand expression. This must be a function type (|P|-combinator). Next, we check
 that the argument (the right-hand expression) has the expected argument type.
 As a by-product, we now have the elaboration of the argument available, which
 we apply to the function type's body to calculate the return type.
@@ -536,8 +544,7 @@ we apply to the function type's body to calculate the return type.
 \[
 \inferrule
   {
-    \tinfer{\Gamma}{e_1}{t_1}{c_1}\\
-    t1 = P~t_2~f\\
+    \tinfer{\Gamma}{e_1}{P~t_2~f}{c_1}\\
     \tcheck{\Gamma}{e_2}{t_2}{c_2}\\
     \creduced{f~c_2}{t}
   }
@@ -561,31 +568,35 @@ infer env (App e1 e2) = do
 
 \paragraph{Function Type}
 Lastly, to infer the type of a function type, we check that the argument
-type is in fact a type. The elaboration of the argument type is a combinator
-expression, which we reduce as far as possible. Then we check that the return
-type is a type, under an environment extended with the argument variable.
-The elaboration of the function is a P combinator applied to the (reduced)
-argument type and the return type (abstracted over the argument variable).
+type is in fact a type. Then we check that the return type is a type, under an
+environment extended with the argument variable and the elaboration of the
+argument type.
+The elaboration of the function is thus the P combinator applied to the
+argument type $c_1$ and the return type $c_2$ \emph{abstracted over the
+argument variable}. The elaboration is allowed to be reducible, so there is no
+need to reduce $c_1$ and $c_2$.
 
 \[
 \inferrule
   {
+% Reduction of c_1 and c_2 is not needed
     \tcheck{\Gamma}{t_1}{\typ}{c_1}\\
-    \creduced{c_1}{c_1'}\\
-    \tcheck{x:c_1',\Gamma}{t_2}{\typ}{c_2}\\
-    \creduced{c_2}{c_2'}
+%    \creduced{c_1}{c_1'}\\
+%    \tcheck{(\mathit{extend}~x~c_1'~\Gamma)}{t_2}{\typ}{c_2}\\
+%    \creduced{c_2}{c_2'}
+   \tcheck{(\mathit{extend}~x~c_1~\Gamma)}{t_2}{\typ}{c_2}
   }
-  {\tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~c_1'~\abstr{x}{c_2'}}}
+  {
+%    \tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~c_1'~\abstr{x}{c_2'}}
+    \tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~c_1~\abstr{x}{c_2}}
+  }
 \]
 
 \begin{code}
 infer env (Fun x t1 t2) = do
   c1 <- check env t1 T
-  let c1' = reduce' c1
-  c2 <- check (extend x c1' env) t2 T
-  let c2' = reduce' c2
-  -- ^ The elaboration can be reducible, so probably not needed
-  Right $ T :~> (P @@ c1' @@ abstract x c2')
+  c2 <- check (extend x c1 env) t2 T
+  Right $ T :~> (P @@ c1 @@ abstract x c2)
 \end{code}
 
 
@@ -628,9 +639,9 @@ will have been instantiated.
 \[
 \inferrule
   {
-    x:x_t,\Gamma = \mathit{extend}~x~t_1~\Gamma\\
-    \creduced{f~x_t}{t_2}\\
-    \tcheck{x:x_t,\Gamma}{e}{t_2}{c}
+    x:t_x,\Gamma = \mathit{extend}~x~t_1~\Gamma\\
+    \creduced{f~t_x}{t_2}\\
+    \tcheck{x:t_x,\Gamma}{e}{t_2}{c}
   }
   {\tcheck{\Gamma}{\lam{x}{e}}{P~t_1~f}{\abstr{x}{c}}}
 \]
@@ -639,9 +650,9 @@ will have been instantiated.
 check env (Lam x e) t = do
   case t of
     P :*: t1 :*: f -> do
-      let (_,xt):_ = extend x t1 env
-          t2 = reduce' (f @@ xt)
-      abstract x <$> check ((x,xt):env) e t2
+      let (_,tx):_ = extend x t1 env
+          t2 = reduce' (f @@ tx)
+      abstract x <$> check ((x,tx):env) e t2
       -- should we substitute into the body here?
       -- does lambda-pi have the same flaw?
     _ ->
@@ -740,6 +751,17 @@ type to $A$:
   Type mismatch: Could not match expected type T with
   inferred type P T (K T)
 \end{repl}
+
+Have we really unified terms and types? Let's define a function with a
+non-trivial type:
+
+\begin{repl}
+  > (\x.x) : (((\t.(x:t) -> t) : (t : *) -> *) *)
+  I => I
+   : P T (K T)
+\end{repl}
+
+We have a function in a type, so yes!
 
 Where do we go from here? More language features? Comparison? Acknowledge that
 Lambda-Pi is still pretty neat. Can we do implicits?
