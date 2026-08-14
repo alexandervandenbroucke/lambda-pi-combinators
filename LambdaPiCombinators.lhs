@@ -497,21 +497,21 @@ indeed has this type.
 \[
 \inferrule
   {
-    \tcheck{\Gamma}{t}{T}{t'}\\
-    \creduced{t'}{t''}\\
-    \tcheck{\Gamma}{e}{t''}{e'}
+    \tcheck{\Gamma}{r}{T}{r'}\\
+    \creduced{r'}{t}\\
+    \tcheck{\Gamma}{e}{t}{c}
   }
   {
-    \tinfer{\Gamma}{e:t}{t''}{e'}
+    \tinfer{\Gamma}{e:r}{t}{c}
   }
 \]
 
 \begin{code}
-infer env (Ann e t) = do
-  t' <- check env t T
-  let t'' = reduce' t'
-  e' <- check env e t''
-  Right $ t'' :~> e'
+infer env (Ann e r) = do
+  r' <- check env r T
+  let t = reduce' r'
+  c <- check env e t
+  Right $ t :~> c
 \end{code}
 
 \paragraph{Type}
@@ -536,22 +536,20 @@ we apply to the function type's body to calculate the return type.
 \[
 \inferrule
   {
-    \tinfer{\Gamma}{e_1}{t_1}{e_1'}\\
-    t1 = P~\targ~\tret\\
-    \tcheck{\Gamma}{e_2}{\targ}{e_2'}\\
-    \creduced{\tret}{\tret'}
+    \tinfer{\Gamma}{e_1}{t_1}{c_1}\\
+    t1 = P~t_2~t\\
+    \tcheck{\Gamma}{e_2}{t_2}{c_2}\\
   }
-  {\tinfer{\Gamma}{e1~e2}{\tret'}{e_1'~e_2'}}
+  {\tinfer{\Gamma}{e1~e2}{t}{c_1~c_2}}
 \]
 
 \begin{code}
 infer env (App e1 e2) = do
-  t1 :~> e1' <- infer env e1
+  t1 :~> c1 <- infer env e1
   case t1 of
-    P :*: tArg :*: tRet -> do
-      e2' <- check env e2 tArg
-      let tRet' = reduce' (tRet @@ e2')
-      Right $ tRet' :~> (e1' @@ e2')
+    P :*: t2 :*: t -> do
+      c2 <- check env e2 t2
+      Right $ t :~> (c1 @@ c2)
     _ -> Left $
       "Could not match expected type " <>
       show (Fun "x" (Inf (Var "A")) (Inf (Var "B"))) <>
@@ -559,7 +557,7 @@ infer env (App e1 e2) = do
       show t1
 \end{code}
 
-\paragraph{Function}
+\paragraph{Function Type}
 Lastly, to infer the type of a function type, we check that the argument
 type is in fact a type. The elaboration of the argument type is a combinator
 expression, which we reduce as far as possible. Then we check that the return
@@ -567,25 +565,27 @@ type is a type, under an environment extended with the argument variable.
 The elaboration of the function is a P combinator applied to the (reduced)
 argument type and the return type (abstracted over the argument variable).
 
-\begin{code}
-infer env (Fun x t1 t2) = do
-  t1' <- check env t1 T
-  let t1'' = reduce' t1'
-  t2' <- check (extend x t1'' env) t2 T
-  let t2'' = reduce' t2' -- Is this needed?
-  Right $ T :~> (P @@ t1'' @@ abstract x t2'')
-\end{code}
-
 \[
 \inferrule
   {
-    \tcheck{\Gamma}{t_1}{\typ}{t_1'}\\
-    \creduced{t_1'}{t_1''}\\
-    \tcheck{x:t_1'',\Gamma}{t_2}{\typ}{t_2'}\\
-    \creduced{t_2'}{t_2''}
+    \tcheck{\Gamma}{t_1}{\typ}{c_1}\\
+    \creduced{c_1}{c_1'}\\
+    \tcheck{x:c_1',\Gamma}{t_2}{\typ}{c_2}\\
+    \creduced{c_2}{c_2'}
   }
-  {\tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~t_1''~\abstr{x}{t_2''}}}
+  {\tinfer{\Gamma}{\funty{x}{t_1}{t_2}}{\typ}{P~c_1'~\abstr{x}{c_2'}}}
 \]
+
+\begin{code}
+infer env (Fun x t1 t2) = do
+  c1 <- check env t1 T
+  let c1' = reduce' c1
+  c2 <- check (extend x c1' env) t2 T
+  let c2' = reduce' c2
+  -- ^ The elaboration can be reducible, so probably not needed
+  Right $ T :~> (P @@ c1' @@ abstract x c2')
+\end{code}
+
 
 \subsection{Type Checking}
 %% =======================
@@ -597,10 +597,10 @@ same.
 \[
 \inferrule
   {
-   \tinfer{\Gamma}{e}{t'}{e'}\\
+   \tinfer{\Gamma}{e}{t'}{c}\\
    t \normeq t'
   }
-  {\tcheck{\Gamma}{e}{t}{e'}}
+  {\tcheck{\Gamma}{e}{t}{c}}
 \]
 
 \begin{code}
@@ -627,19 +627,19 @@ will have been instantiated.
 \inferrule
   {
     x:x_t,\Gamma = \mathit{extend}~x~t_1~\Gamma\\
-    \creduced{t_2~x_t}{t_2'}\\
-    \tcheck{x:x_t,\Gamma}{e}{t_2'}{e'}
+    \creduced{f~x_t}{t_2}\\
+    \tcheck{x:x_t,\Gamma}{e}{t_2}{c}
   }
-  {\tcheck{\Gamma}{\lam{x}{e}}{P~t_1~t_2}{\abstr{x}{e'}}}
+  {\tcheck{\Gamma}{\lam{x}{e}}{P~t_1~f}{\abstr{x}{c}}}
 \]
 
 \begin{code}
 check env (Lam x e) t = do
   case t of
-    P :*: t1 :*: t2 -> do
-      let (_,xt):env' = extend x t1 env
-          t2' = reduce' (t2 @@ xt)
-      abstract x <$> check ((x,xt):env') e t2'
+    P :*: t1 :*: f -> do
+      let (_,xt):_ = extend x t1 env
+          t2 = reduce' (f @@ xt)
+      abstract x <$> check ((x,xt):env) e t2
       -- should we substitute into the body here?
       -- does lambda-pi have the same flaw?
     _ ->
