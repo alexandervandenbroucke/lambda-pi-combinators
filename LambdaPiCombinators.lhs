@@ -50,6 +50,7 @@
   #3
   #4
 }
+\newcommand{\todo}{\textbf{TODO:}}
 
 \title{A New Implementation Technique For Dependently-Typed Languages}
 \acmConference
@@ -67,7 +68,7 @@
 \email{alexander.vandenbroucke@gmail.com}
 
 \begin{abstract}
-TODO
+\todo
 \end{abstract}
 
 \begin{document}
@@ -289,14 +290,6 @@ reduce = \case
   C :*: f :*: g :*: x -> Just (f :@: x :@: g)
 \end{code}
 
-Like Turner's, our |P| combinator allows reduction to proceed under its
-arguments:
-
-\begin{code}
-  P :*: x :*: y | Just x' <- reduce x -> Just (P :@: x' :@: y)
-                | Just y' <- reduce y -> Just (P :@: x  :@: y')
-\end{code}
-
 The next three clauses implement the following reduction rules for |S'|, |B'|
 and |C'|:
 
@@ -316,13 +309,21 @@ Again, feel free to ignore these on a first reading.
   C' :*: k :*: f :*: g :*: x->Just (k :@: (f :@: x) :@: g)
 \end{code}
 
-Finally, if none of the previous cases match, we recurse down the left-most
-argument until we find the left-most expression that can be reduced.
+Finally, if none of the previous cases match, we recurse down the left
+argument until we find the left-most expression that can be reduced. If
+reduction is not possible there, we try the right argument.
 
 \begin{code}
   f :*: g | Just f' <- reduce f -> Just (f' :@: g)
+          | Just g' <- reduce g -> Just (f  :@: g')
   _                             -> Nothing
 \end{code}
+
+This implies, for instance, that in |P x y|, |x| and |y| can be reduced.
+
+\todo~what is the implication for normal order reduction? Note that rules
+similar to this are already required for numerical operations (|plus|) and
+|U|.
 
 The extension of $\creduce{}{}$ to multiple steps, denoted $\creduced{}{}$, is
 implemented by |reduce'|:
