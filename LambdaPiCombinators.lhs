@@ -347,9 +347,11 @@ The bracket abstraction algorithm is also standard, except that dependent
 function types (|Fun|) are abstracted by the following rule (using [x]E to
 denote abstracting E with respect to x):
 
-\begin{equation*}
-\abstr{x}{(\funty{y}{E_1}{E_2})} = P~\abstr{x}{E_1}~\abstr{x}{(\abstr{y}{E_2})}
-\end{equation*}
+\begin{align*}
+\abstr{x}{(\funty{y}{E_1}{E_2})}
+   &= [x](P~E_1~\abstr{y}{E_2}) \\
+   &= S~(S~(K~P)~\abstr{x}{E_1})~\abstr{x}{(\abstr{y}{E_2})}
+\end{align*}
 
 That is, the both argument and result type are abstracted over
 
@@ -368,8 +370,9 @@ instance Abstraction (Term m) where
   abstract x (Lam y e)     = abstract x (abstract y e)
   abstract x (Ann e _)     = abstract x e
   abstract x (Inf e)       = abstract x e
-  abstract x (Fun y e1 e2) =
-    P @@ abstract x e1 @@ abstract x (abstract y e2)
+  abstract x (Fun y e1 e2) = S @@ (S @@ (K @@ P)
+                                     @@ abstract x e1)
+                               @@ abstract x (abstract y e2)
   abstract x (Var x') | x == x' = I
                       | otherwise = K @@ V x'
 
