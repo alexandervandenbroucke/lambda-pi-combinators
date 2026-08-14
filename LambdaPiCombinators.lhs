@@ -537,8 +537,9 @@ we apply to the function type's body to calculate the return type.
 \inferrule
   {
     \tinfer{\Gamma}{e_1}{t_1}{c_1}\\
-    t1 = P~t_2~t\\
+    t1 = P~t_2~f\\
     \tcheck{\Gamma}{e_2}{t_2}{c_2}\\
+    \creduced{f~c_2}{t}
   }
   {\tinfer{\Gamma}{e1~e2}{t}{c_1~c_2}}
 \]
@@ -547,8 +548,9 @@ we apply to the function type's body to calculate the return type.
 infer env (App e1 e2) = do
   t1 :~> c1 <- infer env e1
   case t1 of
-    P :*: t2 :*: t -> do
+    P :*: t2 :*: f -> do
       c2 <- check env e2 t2
+      let t = reduce' (f @@ c2)
       Right $ t :~> (c1 @@ c2)
     _ -> Left $
       "Could not match expected type " <>
