@@ -347,17 +347,31 @@ reduce' c = maybe c reduce' (reduce c)
 %% ----------------------------------------------------------------------------
 \label{sec:bracket-abstraction}
 
-The bracket abstraction algorithm is also standard, except that dependent
-function types (|Fun|) are abstracted by the following rule (using [x]E to
-denote abstracting E with respect to x):
+The bracket abstraction algorithm is also standard, so we will not repeat most
+of the rules here, except that dependent
+function types $\funty{y}{E_1}{E_2}$ are abstracted by the following rule
+(using $\abstr{x}{E}$ to denote abstracting $E$ over $x$):
 
 \begin{align*}
 \abstr{x}{(\funty{y}{E_1}{E_2})}
    &= [x](P~E_1~\abstr{y}{E_2}) \\
+   &= S~\abstr{x}{(P~E_1)}~\abstr{x}{(\abstr{y}{E_2})} \\
    &= S~(S~(K~P)~\abstr{x}{E_1})~\abstr{x}{(\abstr{y}{E_2})}
 \end{align*}
 
-That is, the both argument and result type are abstracted over
+That is, the body of the function type is first abstracted over $y$, and then
+the |P| combinator is applied to both $E_1$ and $\abstr{x}{E_2}$.
+This presents a slight problem: since $E_1$ is not a combinator expression,
+|P| cannot be applied to it directly, so $P~E_1$ is nonsense. This will be
+addressed shortly. The entire expression is then abstracted over $x$.
+
+Now, recall the bracket-abstraction rule for application:
+
+\[
+\abstr{x}{(E_1~E_2)} = S~\abstr{x}{E_1}~\abstr{x}{E_2}
+\]
+
+Applying this rule twice mends the notation.
 
 For convenience, abstraction is defined in a type-class. This allows ad-hoc
 polymorphism in the |abstract| function, because we need to be able to abstract
@@ -770,9 +784,6 @@ non-trivial type:
 
 We have a function in a type, so yes!
 
-Where do we go from here? More language features? Comparison? Acknowledge that
-Lambda-Pi is still pretty neat. Can we do implicits?
-
 \section{Related Work}
 %% ----------------------------------------------------------------------------
 \label{sec:related-work}
@@ -780,6 +791,14 @@ Lambda-Pi is still pretty neat. Can we do implicits?
 \section{Conclusion}
 %% ----------------------------------------------------------------------------
 \label{sec:conclusion}
+
+\paragraph{Future Work}
+
+\todo
+More language features? Comparison with Lambda-Pi? Acknowledge that
+Lambda-Pi is still pretty neat. Can we do implicits? Graph-reduction?
+
+
 
 \appendix{Pretty Printing}
 %% ----------------------------------------------------------------------------
