@@ -923,7 +923,7 @@ instance ToTerm Expr where
 
 instance ToTerm EAnn where
   toTerm (EAnn e t) = Inf <$> (Ann <$> toTerm e <*> toTerm t)
-  toTerm (OfApp t) = toTerm t
+  toTerm (OfApp t)  = toTerm t
 
 instance ToTerm EType where
   toTerm (EFun x t1 t2) = Inf <$> (Fun x <$> toTerm t1 <*> toTerm t2)
@@ -1000,7 +1000,10 @@ qq name exp =
   where
     invalid :: String -> String -> Q a
     invalid ctx _ =
-      fail $ name <> "quasi-quoter cannot be used in a " <> ctx <> " context!"
+      fail $
+        name
+        <> "quasi-quoter cannot be used in a "
+        <> ctx <> " context!"
 
 lpc :: QuasiQuoter
 lpc = qq "lpc" $ \str -> case parse str of
@@ -1009,8 +1012,10 @@ lpc = qq "lpc" $ \str -> case parse str of
 
 lpci :: QuasiQuoter
 lpci = qq "lpci" $ \str -> case parse str of
-  Left  err  -> fail $ "lpci quasi-quoter parse error: " <> err
-  Right Lam{} -> fail "lpci quasi-quoter: quoted expression is not inferrable"
+  Left  err ->
+    fail $ "lpci quasi-quoter parse error: " <> err
+  Right Lam{} ->
+    fail "lpci quasi-quoter: quoted expression is not inferrable"
   Right (Inf term) -> [|term|]
 
 typ :: QuasiQuoter
@@ -1018,8 +1023,10 @@ typ = qq "typ" $ \str -> case parse str of
   Left err -> fail $ "typ quasi-quoter parse error: " <> err
   Right t -> case check [] t T of
     Left err ->
-      fail $ "typ quasi-quoter: quoted expression is not a type: " <> err
-    Right c -> let r = reduce' c in [|r|]
+      fail $
+        "typ quasi-quoter: quoted expression is not a type: " <> err
+    Right c ->
+      let r = reduce' c in [|r|]
 \end{code}
 
 \bibliographystyle{plain}
