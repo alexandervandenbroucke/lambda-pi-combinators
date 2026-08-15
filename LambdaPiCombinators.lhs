@@ -85,6 +85,9 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# LANGUAGE DeriveLift      #-}
+{-# LANGUAGE TemplateHaskell #-}
+
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
 module LambdaPiCombinators where
@@ -94,13 +97,14 @@ import GHC.TypeLits (Nat, type (+))
 import Text.ParserCombinators.ReadP
 import Data.Char (isAlpha, isAlphaNum)
 import Control.Exception (try, displayException)
-
+import Language.Haskell.TH.Syntax (Lift, Exp, Q)
+import Language.Haskell.TH.Quote (QuasiQuoter(..))
 \end{code}
 
 }
 
 Once upon a time, I was reading ``A tutorial implementation of a dependently
-typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}. 
+typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}.
 It contains both a formal specification of a simple dependently typed
 lambda-calculus and a Haskell implementation of the abstract syntax, evaluation
 and type checking. The tutorial is excellent, and I would warmly recommend it
@@ -975,6 +979,41 @@ main =
             putStrLn $ eval str
             go
   in go
+\end{code}
+
+\appendix{Quasi Quoter}
+%% ----------------------------------------------------------------------------
+
+\begin{code}
+deriving instance Lift (Term Infer)
+deriving instance Lift (Term Check)
+deriving instance Lift Combinator
+
+qq :: String -> (String -> Q Exp) -> QuasiQuoter
+qq name exp =
+  QuasiQuoter
+  { quoteExp  = exp
+  , quotePat  = invalid "pattern"
+  , quoteType = invalid "type"
+  , quoteDec  = invalid "declaration"
+  }
+  where
+    invalid :: String -> String -> Q a
+    invalid ctx _ =
+      fail $ name <> "quasi-quoter cannot be used in a " <> ctx <> " context!"
+
+lpc :: QuasiQuoter
+lpc = qq "lpc" $ \str -> case parse str of
+  Left  err  -> fail $ "lpc quasi-quoter parse error: " <> err
+  Right term -> [|term|]
+
+typ :: QuasiQuoter
+typ = qq "typ" $ \str -> case parse str of
+  Left err -> fail $ "typ quasi-quoter parse error: " <> err
+  Right t -> case check [] t T of
+    Left err ->
+      fail $ "typ quasi-quoter: quoted expression is not a type: " <> err
+    Right c -> let r = reduce' c in [|r|]
 \end{code}
 
 \bibliographystyle{plain}
