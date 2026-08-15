@@ -1007,6 +1007,12 @@ lpc = qq "lpc" $ \str -> case parse str of
   Left  err  -> fail $ "lpc quasi-quoter parse error: " <> err
   Right term -> [|term|]
 
+lpci :: QuasiQuoter
+lpci = qq "lpci" $ \str -> case parse str of
+  Left  err  -> fail $ "lpci quasi-quoter parse error: " <> err
+  Right Lam{} -> fail "lpci quasi-quoter: quoted expression is not inferrable"
+  Right (Inf term) -> [|term|]
+
 typ :: QuasiQuoter
 typ = qq "typ" $ \str -> case parse str of
   Left err -> fail $ "typ quasi-quoter parse error: " <> err

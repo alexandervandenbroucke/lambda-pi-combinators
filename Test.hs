@@ -6,11 +6,14 @@
 
 module Test where
 
-import LambdaPiCombinators
+import Control.Monad (unless)
+import LambdaPiCombinators hiding (main)
 import Language.Haskell.TH.Syntax (Lift, Exp, Q)
 import Language.Haskell.TH.Quote (QuasiQuoter(..))
 import Text.ParserCombinators.ReadP
 import GHC.Stack (HasCallStack, withFrozenCallStack)
+
+import qualified LambdaPi as LPi
 
 {-
 Things to test for:
@@ -68,17 +71,41 @@ atomP = lexeme $ do
     _ :*: _ -> pfail
     atom    -> pure atom
 
+-- | Test that type checking succeeds
 test :: HasCallStack => Term Check -> Typ -> IO ()
 test term expected = withFrozenCallStack $
   case check [] term expected of
     Left err -> error err
     Right{}  -> pure ()
 
+-- | Test that type checking fails
 failure :: HasCallStack => Term Check -> Typ -> IO ()
 failure term expected = withFrozenCallStack $
   case check [] term expected of
     Left err -> pure ()
     Right{}  -> error "Expected failure!"
+
+-- | Test that inference for LPi and LPiC satisfy:
+--
+--   > |- t => ty ~> c and |- t' => ty and t == [x]ty
+--
+--   where @t' = LPi.toInfer [] t@, and x does not occur in @ty@.
+lPi :: HasCallStack => Term Infer -> IO ()
+lPi term = withFrozenCallStack $
+  unless (c1 =<*>= c2) $ 
+    error $ unlines 
+      [ "Inference mismatch:"
+      , "  LPiC: " ++ show c1
+      , "  LPi:  " ++ show c2
+      ]
+  where
+    x =<*>= y = Right True == liftA2 (=*=) x y
+    c1 = ty <$> infer [] term
+    v2 = LPi.infer 0 [] (LPi.toInfer [] term)    
+    c2 = unK . abstract "0" . LPi.toTerm0 <$> v2
+    ty (t :~> _) = t
+    unK (K :*: x) = x
+    
 
 main :: IO ()
 main = do
@@ -94,3 +121,7 @@ main = do
   test    [lpc|(A : (B:*) -> *) -> A *|] [typ|*|]
   failure [lpc|(C : (B : *) -> *) -> (A : (B : *) -> *) -> A C|] [typ|*|]
   test    [lpc|(\x.x) : (((\t.(x:t) -> t) : (t : *) -> *) *)|] [typ|(x:*) -> *|]
+  lPi     [lpci|*|]
+  lPi     [lpci|(x:*) -> *|]      
+  lPi     [lpci|(\x.x) : (((\t.(x:t) -> t) : (t : *) -> *) *)|]
+  lPi     [lpci|(A : (B:*) -> *) -> A *|]
