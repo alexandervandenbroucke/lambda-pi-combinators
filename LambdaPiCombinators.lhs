@@ -402,8 +402,9 @@ instance Abstraction Combinator where
 \end{code}
 
 The |@@| operator is a smart constructor for application. It implements a more
-efficient abstraction. On a first reading, the reader may pretend that
-|@@| is simply |:@:|. Like |:@:| it binds most tightly to the left.
+efficient abstraction. Like |:@:| it binds most tightly to the left.
+On a first reading, the reader may pretend that |@@| is simply |:@:|, and
+skip the remainder of this section.
 
 The first four cases of |@@| replace degenerate applications of |S| with
 applications of |K|, |B| and |C|. Degenerate means that the variable being
