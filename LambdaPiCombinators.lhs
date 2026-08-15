@@ -52,7 +52,8 @@
 }
 \newcommand{\todo}{\textbf{TODO:}}
 
-\title{A New Implementation Technique For Dependently-Typed Languages}
+\title{An Alternative Implementation Technique For Dependently-Typed Language
+  Tutorials}
 \acmConference
   [IFL2026]
   {Symposium on Implementation and Application of Functional Languages}
@@ -106,7 +107,7 @@ import Language.Haskell.TH.Quote (QuasiQuoter(..))
 Once upon a time, I was reading ``A tutorial implementation of a dependently
 typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}.
 It contains both a formal specification of a simple dependently typed
-lambda-calculus and a Haskell implementation of the abstract syntax, evaluation
+lambda-calculus and a Haskell implementation of its abstract syntax, evaluation
 and type checking. The tutorial is excellent, and I would warmly recommend it
 to anyone interested in a basic implementation of dependent types.
 However, in my opinion, the elegance of the core calculus is spoiled somewhat
@@ -114,26 +115,38 @@ by the locally- nameless~\citep{DBLP:journals/jar/Chargueraud12} style of the
 implementation.
 The locally-nameless style uses names (i.e., strings) to represent free
 variables and De-Bruijn indices for locally bound terms.
-While this has certain proof-engineering advantages, for implementing a simple
-calculus, locally nameless representation combines the weaknesses of named and
-nameless (De-Bruijn) representation:
+While this has certain proof-engineering advantages,\footnote{$\alpha$-
+  equivalence and syntatic equality coincide, for example.} for implementing
+a simple calculus, locally nameless representation combines the weaknesses of
+named and nameless (De-Bruijn) representations:
 
 \begin{enumerate}
 \item
   Evaluation is also needed for type reduction during type checking, but
-  evaluation with De-Bruijn indices is inefficient.
+  evaluation with De-Bruijn indices is hopelessly inefficient.
 
 \item
   De-Bruijn indices are nevertheless often used because they are alledgedly
-  simple, but I find substitution with De-Bruijn indices is fiddly and annoying
-  to implement.
+  simple, but substitution with De-Bruijn indices is (in the author's opinion)
+  fiddly to implement, harming the clarity of the code.
+  \todo formulate this better: it makes the code further removed from the
+  typing rules.
+  The Lambda-Pi author's themselve admit that this is cumbersome.
 
 \item
   Verifying type equivalence during type checking requires re-quoting a
-  locally-nameless term into a named representation anyway.
+  locally-nameless term into a named representation anyway, so the benefit of
+  a nameless style is lost.
+
+\item \todo They also use HOAS in values.
+
 \end{enumerate}
 
-The idea of this article is that we can avoid this unpleasantness by using
+All of this unpleasantness stems from having to deal with variables. It is
+better not to deal with them at all. \todo~Rewrite introduction using this
+idea.
+
+The idea of this article is that we can avoid variables altogether by using
 Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation technique
 instead. This technique consists of two parts that are simple to understand
 and implement: a set of basic combinators and reduction rules, and an
