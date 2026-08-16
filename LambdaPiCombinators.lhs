@@ -104,51 +104,41 @@ import Language.Haskell.TH.Quote (QuasiQuoter(..))
 
 }
 
-Once upon a time, I was reading ``A tutorial implementation of a dependently
-typed lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}.
+In their article ``A tutorial implementation of a dependently typed
+lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}, L\"{o}h et al. set out
+to prove that dependent types (and their implementation) need not be scary or
+hard to understand.
 It contains both a formal specification of a simple dependently typed
 lambda-calculus and a Haskell implementation of its abstract syntax, evaluation
 and type checking. The tutorial is excellent, and I would warmly recommend it
 to anyone interested in a basic implementation of dependent types.
-However, in my opinion, the elegance of the core calculus is spoiled somewhat
-by the locally- nameless~\citep{DBLP:journals/jar/Chargueraud12} style of the
-implementation.
-The locally-nameless style uses names (i.e., strings) to represent free
-variables and De-Bruijn indices for locally bound terms.
-While this has certain proof-engineering advantages,\footnote{$\alpha$-
-  equivalence and syntatic equality coincide, for example.} for implementing
-a simple calculus, locally nameless representation combines the weaknesses of
-named and nameless (De-Bruijn) representations:
+However, in my opinion, the elegance of the core calculus is reduced
+by the style of the implementation, particularily how variables are
+represented. Three representations are used:
 
 \begin{enumerate}
 \item
-  Evaluation is also needed for type reduction during type checking, but
-  evaluation with De-Bruijn indices is hopelessly inefficient.
-
+  Locally bound variables are represented by de Bruijn indices: a number
+  indicating how many lambdas occur between its binder and the occurrence of
+  the variables. The advantage is that $\alpha$-equivalence for de Bruijn
+  indexed terms coincides with syntactic equality of terms.
 \item
-  De-Bruijn indices are nevertheless often used because they are alledgedly
-  simple, but substitution with De-Bruijn indices is (in the author's opinion)
-  fiddly to implement, harming the clarity of the code.
-  \todo formulate this better: it makes the code further removed from the
-  typing rules.
-  The Lambda-Pi author's themselve admit that this is cumbersome.
-
+  Free variables are represented using names (i.e., strings) to avoid the
+  cumbersome updating of terms every time we go under a lambda. This style is
+  called locally-nameless~\citep{DBLP:journals/jar/Chargueraud12}.
 \item
-  Verifying type equivalence during type checking requires re-quoting a
-  locally-nameless term into a named representation anyway, so the benefit of
-  a nameless style is lost.
-
-\item \todo They also use HOAS in values.
-
+  Higher-order abstract syntax (HOAS) is used to represent values: function
+  values are represented directly using Haskell functions, which means we can
+  piggy-back onto Haskell function application. The down-side is that
+  Haskell functions cannot be compared for equality or directly shown as a
+  string. In order to display or compare values, they first need to be quoted
+  back into a concrete representation.
 \end{enumerate}
 
-All of this unpleasantness stems from having to deal with variables. It is
-better not to deal with them at all. \todo~Rewrite introduction using this
-idea.
-
-The idea of this article is that we can avoid variables altogether by using
-Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation technique
-instead. This technique consists of two parts that are simple to understand
+The idea of this article is that \emph{the best way to represent variables is
+to not represent them at all.} We can avoid variables altogether by using
+Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation
+technique. This technique consists of two parts that are simple to understand
 and implement: a set of basic combinators and reduction rules, and an
 abstraction algorithm which eliminates variables from a lambda-calculus term by
 translating it into those combinators.
