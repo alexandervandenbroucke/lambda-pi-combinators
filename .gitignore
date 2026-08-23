@@ -5,3 +5,7 @@
 *.pdf
 *.bbl
 *.blg
+*.o
+*.hi
+*.dyn_hi
+*.dyn_o
