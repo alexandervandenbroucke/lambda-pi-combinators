@@ -2,6 +2,7 @@
 
 \usepackage{fancyvrb}    %% Source Code listings
 \usepackage{mathpartir}  %% Type Inference Rules
+\usepackage{mathtools}   %% \xRightarrow
 
 \DefineVerbatimEnvironment{code}{Verbatim}{fontsize=\small}
 \DefineVerbatimEnvironment{spec}{Verbatim}{fontsize=\small}
@@ -12,11 +13,11 @@
 \newcommand
   {\creduce}
   [2]
-  {#1 \rightarrow #2}
+  {#1 \Rightarrow #2}
 \newcommand
   {\creduced}
   [2]
-  {#1~{\Rightarrow}~#2}
+  {#1~\xRightarrow{*}~#2}
 \newcommand
   {\abstr}
   [2]
@@ -52,8 +53,8 @@
 }
 \newcommand{\todo}{\textbf{TODO:}}
 
-\title{An Alternative Implementation Technique For Dependently-Typed Language
-  Tutorials}
+\title{An New Implementation Technique For The Dependently-Typed Lambda
+  Lambda Calculus}
 \acmConference
   [IFL2026]
   {Symposium on Implementation and Application of Functional Languages}
@@ -69,8 +70,37 @@
 \email{alexander.vandenbroucke@gmail.com}
 
 \begin{abstract}
-\todo
+Can you implement a dependently-typed lambda calculus using Turner's logical
+combinator technique? Yes. The reason this is interesting is that type checking
+a dependently-typed language inherently mixes type-checking with execution,
+because your types can be terms (and terms can be types), and hence have
+operational meaning. The solution presented here elaborates terms (or
+types, whichever) into combinator expressions on-the-fly during type checking.
+Only one extra combinator, T, is required in addition to Turner's 9 original
+combinators, S, K, I, P, B, C, S', B' and C' to implement a simple
+bi-directional type system (only the first four combinators are essential).
 \end{abstract}
+
+\keywords{combinators, dependent types, lambda calculus, type checking, type
+inference, bracket abstraction}
+
+\begin{CCSXML}
+<ccs2012>
+   <concept>
+       <concept_id>10011007.10011006.10011041</concept_id>
+       <concept_desc>Software and its engineering~Compilers</concept_desc>
+       <concept_significance>500</concept_significance>
+       </concept>
+   <concept>
+       <concept_id>10011007.10011006.10011039.10011311</concept_id>
+       <concept_desc>Software and its engineering~Semantics</concept_desc>
+       <concept_significance>500</concept_significance>
+       </concept>
+ </ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Software and its engineering~Compilers}
+\ccsdesc[500]{Software and its engineering~Semantics}
 
 \begin{document}
 
@@ -104,51 +134,59 @@ import Language.Haskell.TH.Quote (QuasiQuoter(..))
 
 }
 
-In their article ``A tutorial implementation of a dependently typed
-lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10}, L\"{o}h et al. set out
-to prove that dependent types (and their implementation) need not be scary or
-hard to understand.
+Can you implement a dependently-typed lambda calculus using Turner's logical
+combinator technique? Yes. Here's an example of a polymorphic identity
+function:
+
+\begin{align*}
+(\lam{\alpha}{\lam{x}{x}}) : \funty{\alpha}{\typ}{\funty{x}{\alpha}{\alpha}}
+\end{align*}
+
+And here is the combinator it is implemented by: |I|. This combinator
+implements the identity function directly. More interestingly, the type of the
+function, $\funty{\alpha}{\typ}{\funty{x}{\alpha}{\alpha}}$ elaborates to
+|P T (S P K)|.
+The |P| combinator constructs a function type, in other words, a \textbf{P}i
+type. Rather than the usual infix-arrow syntax $\funty{x}{\typ}{\cdots}$, |P|
+is a prefix operator. We can thus read |P T (S P K)| as the type of a function
+expecting an argument $\alpha$ of type |T| (the type of types) and returning a
+value of type $\texttt{S P K}~\alpha$. This reduces as follows:
+$\creduce{\texttt{S P K}~\alpha}{\texttt{P }\alpha~(\texttt{K }\alpha)}$.
+Another function type, this time expecting an argument $x$ of type $\alpha$,
+and producing a value of type $\texttt{K }\alpha x$. This finally reduces to
+$\alpha$: $\creduce{$\texttt{K }\alpha~x$}{\alpha}$, as expected of the
+identity function.
+
+It should be obvious from the previous paragraph that a dependently-typed
+calculus has just as much interesting execution going on in its types as in
+its terms, if not more. This is because there is no (syntactic) distinction
+between terms and types: you can have types in your terms and terms in your
+types. The implication is that type checking and execution are inherently
+interwoven. Therefore, while in the middle of type checking, we need to
+generate an executable representation of the types against which terms are
+checked.\footnote{We generate combinators both during type checking and
+  inference, but only checking is mentioned here for simplicity.}
+We choose to use Turner's logical combinators~\cite{DBLP:journals/spe/Turner79}
+because they are straightforward to implement, yet admit an easy path to decent
+performance via graph reduction. Most importantly, they make substitution
+trivial (which is usually tricky to get right) because the key idea of the
+combinators technique is to eliminate variables entirely.
+
+Variable elimination is accomplished by the well-known bracket abstraction
+algorithm~\cite{DBLP:journals/spe/Turner79,DBLP:journals/jsyml/Turner79}.
+The bracket abstraction algorithm for a dependently-typed lambda term that is
+presented here is only a modest generalisation from the original untyped
+version---though it is novel to the best of our knowledge.
+
+The calculus implemented in this article is based on the language presented in
+``A tutorial implementation of a dependently typed
+lambda-calculus''~\citep{DBLP:journals/fuin/LohMS10} by L\"{o}h et al. They
+set out to prove that dependent types (and their implementation) need not be
+scary or hard to understand.
 It contains both a formal specification of a simple dependently typed
 lambda-calculus and a Haskell implementation of its abstract syntax, evaluation
 and type checking. The tutorial is excellent, and I would warmly recommend it
-to anyone interested in a basic implementation of dependent types.
-However, in my opinion, the elegance of the core calculus is reduced
-by the style of the implementation, particularily how variables are
-represented. Three representations are used:
-
-\begin{enumerate}
-\item
-  Locally bound variables are represented by de Bruijn indices: a number
-  indicating how many lambdas occur between its binder and the occurrence of
-  the variables. The advantage is that $\alpha$-equivalence for de Bruijn
-  indexed terms coincides with syntactic equality of terms.
-\item
-  Free variables are represented using names (i.e., strings) to avoid the
-  cumbersome updating of terms every time we go under a lambda. This style is
-  called locally-nameless~\citep{DBLP:journals/jar/Chargueraud12}.
-\item
-  Higher-order abstract syntax (HOAS) is used to represent values: function
-  values are represented directly using Haskell functions, which means we can
-  piggy-back onto Haskell function application. The down-side is that
-  Haskell functions cannot be compared for equality or directly shown as a
-  string. In order to display or compare values, they first need to be quoted
-  back into a concrete representation.
-\end{enumerate}
-
-The idea of this article is that \emph{the best way to represent variables is
-to not represent them at all.} We can avoid variables altogether by using
-Turner's~\citep{DBLP:journals/spe/Turner79} combinator implementation
-technique. This technique consists of two parts that are simple to understand
-and implement: a set of basic combinators and reduction rules, and an
-abstraction algorithm which eliminates variables from a lambda-calculus term by
-translating it into those combinators.
-The abstraction algorithm for a dependently-typed lambda term is only a modest
-generalisation from the untyped lambda calculus---though it is novel to the
-best of our knowledge.
-
-Because the key idea of this technique is to eliminate variables (and
-substitution) altogether, it makes implementing a dependently typed calculus
-much more straightforward.
+to anyone interested in a core implementation of dependent types.
 
 The remainder of this article is laid out as follows:
 \begin{itemize}
@@ -156,7 +194,7 @@ The remainder of this article is laid out as follows:
   We recall the syntax for both the simple dependently typed calculus
   introduced by the previously mentioned tutorial and then introduce the
   set of combinators needed for the implementation in this article: |S|, |K|,
-  |I|, |B|, |C|, |P|, |S'|, |B'| and |C'| (Section~\ref{sec:syntax}).
+  |I|, |P|, |T|, |B|, |C|, |S'|, |B'| and |C'| (Section~\ref{sec:syntax}).
   We also recall the reduction rules for these combinators
   (Section~\ref{sec:reduction}).
 
@@ -178,15 +216,15 @@ The remainder of this article is laid out as follows:
 \item
   Section~\ref{sec:examples} gives some examples of typing and executing
   the new calculus.
-  Section~\ref{sec:related-work}) discusses related work and
-  Section~\ref{sec:conclusion} concludes.
+
+\item
+  Section~\ref{sec:conclusion} concludes and discusses future work.
 \end{itemize}
 
-Despite our best efforts, two places remain where we need to substitute into
-a type: when typing the body of a dependent function (Pi) type or of an
-anonymous function (Lambda). But since types are combinator expressions,
-substitution is simply function application.
-
+This article is written in literate Haskell and is executable. In addition
+to the functionality presented in the main text, the appendices contain code
+implementing parsing, pretty printing, a simple REPL and
+QuasiQuoters~\cite{ACM/geoffrey07}.
 
 \section{Syntax}
 %% ----------------------------------------------------------------------------
@@ -198,7 +236,7 @@ distinction between types and terms: both are captured by the |Term| GADT.
 However, there is a separation between terms whose type can be inferred, and
 whose type can only be checked. For this reason, |Term| is indexed by a |Mode|.
 In all other respects the syntax should be entirely unsurprising.
-The surface level syntax is annotated below every constructor (e.g., |*| for
+The constructors are annotated with their surface level syntax (e.g., |*| for
 |Typ|, |\x.t| for |Lam x t|, etc.).
 
 
@@ -334,9 +372,9 @@ reduction is not possible there, we try the right argument.
 
 This implies, for instance, that in |P x y|, |x| and |y| can be reduced.
 
-\todo~what is the implication for normal order reduction? Note that rules
-similar to this are already required for numerical operations (|plus|) and
-|U|.
+%% \todo~what is the implication for normal order reduction? Note that rules
+%% similar to this are already required for numerical operations (|plus|) and
+%% |U|.
 
 The extension of $\creduce{}{}$ to multiple steps, denoted $\creduced{}{}$, is
 implemented by |reduce'|:
@@ -628,7 +666,7 @@ infer env (Fun x t1 t2) = do
 \subsection{Type Checking}
 %% =======================
 
-We can check all inferrable terms simply by inferring their type, and then
+We can check all inferable terms simply by inferring their type, and then
 verifying that the inferred and the expected combinator expressions are the
 same.
 
@@ -694,10 +732,10 @@ check env (Lam x e) t = do
 \label{sec:examples}
 
 The remaining code in this article implements pretty printing, parsing and a
-small REPL, that, while useful, are not particularily interesting.
+small REPL, that, while useful, are not particularly interesting.
 However, the REPL will serve as a vehicle for some small examples.
 
-Typing an (inferrable) term at the REPL causes it to parse, type and then
+Typing an (inferable) term at the REPL causes it to parse, type and then
 reduce that term, for example:
 
 \begin{repl}
@@ -788,20 +826,39 @@ non-trivial type:
 
 We have a function in a type, so yes!
 
-\section{Related Work}
-%% ----------------------------------------------------------------------------
-\label{sec:related-work}
-
 \section{Conclusion}
 %% ----------------------------------------------------------------------------
 \label{sec:conclusion}
 
-\paragraph{Future Work}
+Turner's logical combinator technique is a flexible method for the
+implementation of functional programming languages. As a testament to this, we
+have shown that only a modest extension is required to adapt it to a
+dependently-typed setting.
+This setting is particularly interesting, because type checking in this
+setting is inherently mixed with evaluation. This has guided us towards an
+extension of the existing bi-directional type checking algorithm that
+elaborates terms or types into combinators on-the-fly.
 
-\todo
-More language features? Comparison with Lambda-Pi? Acknowledge that
-Lambda-Pi is still pretty neat. Can we do implicits? Graph-reduction?
+\paragraph{Future Work} Future work consists of two lines of research:
+First, on the theoretical side, formalising the meta-theory, including a proof
+that the type-directed elaboration is correct with respect to the usual
+operational semantics is an important direction for future work. Given the
+moderate size and unsurprising nature of the type system, we expect standard
+proof techniques to be sufficient.
 
+Secondly, practical combinator implementations rely on graph reductions to
+obtain good performance. It is an open question how we can wed a graph
+reduction engine, an essentially imperative piece of machinery, to the purely
+functional implementation of type checking and inference.
+
+%% \todo
+%% More language features? Comparison with Lambda-Pi? Acknowledge that
+%% Lambda-Pi is still pretty neat. Can we do implicits? Graph-reduction?
+
+%% -----------------------------------------------------------------------------
+
+\bibliographystyle{plain}
+\bibliography{LambdaPiCombinators}
 
 
 \appendix{Pretty Printing}
@@ -980,7 +1037,7 @@ main =
     eval str = either id id $ do
       t <- parse str
       case t of
-        Lam{} -> Left "The top-level term must be inferrable!"
+        Lam{} -> Left "The top-level term must be inferable!"
         Inf t -> do
           (t :~> c) <- infer [] t
           Right $
@@ -1007,6 +1064,8 @@ main =
 \appendix{Quasi Quoter}
 %% ----------------------------------------------------------------------------
 
+Scaffolding code
+
 \begin{code}
 deriving instance Lift (Term Infer)
 deriving instance Lift (Term Check)
@@ -1028,6 +1087,10 @@ qq name exp =
         <> "quasi-quoter cannot be used in a "
         <> ctx <> " context!"
 
+\end{code}
+
+Quoting of expressions |lpc| or, inferable expression |lpci|: 
+\begin{code}
 lpc :: QuasiQuoter
 lpc = qq "lpc" $ \str -> case parse str of
   Left  err  -> fail $ "lpc quasi-quoter parse error: " <> err
@@ -1038,9 +1101,13 @@ lpci = qq "lpci" $ \str -> case parse str of
   Left  err ->
     fail $ "lpci quasi-quoter parse error: " <> err
   Right Lam{} ->
-    fail "lpci quasi-quoter: quoted expression is not inferrable"
+    fail "lpci quasi-quoter: quoted expression is not inferable"
   Right (Inf term) -> [|term|]
+\end{code}
 
+A quoter that any allows expressions of type $\typ$ to be quoted:
+
+\begin{code}
 typ :: QuasiQuoter
 typ = qq "typ" $ \str -> case parse str of
   Left err -> fail $ "typ quasi-quoter parse error: " <> err
@@ -1052,7 +1119,5 @@ typ = qq "typ" $ \str -> case parse str of
       let r = reduce' c in [|r|]
 \end{code}
 
-\bibliographystyle{plain}
-\bibliography{LambdaPiCombinators}
 
 \end{document}
