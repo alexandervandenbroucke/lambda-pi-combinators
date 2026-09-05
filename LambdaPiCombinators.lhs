@@ -150,12 +150,14 @@ The |P| combinator constructs a function type, in other words, a \textbf{P}i
 type. Rather than the usual infix-arrow syntax $\funty{x}{\typ}{\cdots}$, |P|
 is a prefix operator. We can thus read |P T (S P K)| as the type of a function
 expecting an argument $\alpha$ of type |T| (the type of types) and returning a
-value of type $\texttt{S P K}~\alpha$. This reduces as follows:
+value of type $\texttt{S P K}~\alpha$ (note the dependency on the argument
+$\alpha$).
+This reduces as follows:
 $\creduce{\texttt{S P K}~\alpha}{\texttt{P }\alpha~(\texttt{K }\alpha)}$.
-Another function type, this time expecting an argument $x$ of type $\alpha$,
-and producing a value of type $\texttt{K }\alpha x$. This finally reduces to
-$\alpha$: $\creduce{$\texttt{K }\alpha~x$}{\alpha}$, as expected of the
-identity function.
+This is another function type, this time expecting an argument $x$ of type
+$\alpha$, and producing a value of type $\texttt{K }\alpha x$. This finally
+reduces to $\alpha$: $\creduce{\texttt{K}~\alpha~x}{\alpha}$, as expected of
+the identity function.
 
 It should be obvious from the previous paragraph that a dependently-typed
 calculus has just as much interesting execution going on in its types as in
